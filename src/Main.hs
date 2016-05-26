@@ -95,6 +95,14 @@ main = do
         user <- dbQuery (GetUserByNick nick')
         lucid $ do
           h1_ $ toHtml $ user^.name <> " (aka " <> user^.nick <> ")"
+      Spock.get "admin" $ do
+        s <- dbQuery GetGlobalState
+        lucid $ do
+          h1_ "Admin stuff"
+          h2_ "List of users"
+          ul_ $ for_ (s^.users) $ \user -> li_ $ do
+            mkLink (toHtml (user^.name))
+                   ("/user/" <> user^.nick)
 
 mkLink :: Monad m => HtmlT m a -> Url -> HtmlT m a
 mkLink x src = a_ [href_ src] x
