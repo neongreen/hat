@@ -18,5 +18,6 @@ cabal.sandbox.config
 cabal.config
 TAGS
 .DS_Store
+state/
 *~
 *#
