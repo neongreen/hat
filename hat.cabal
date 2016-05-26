@@ -30,6 +30,7 @@ executable hat
                      , base >=4.8 && <5
                      , base-prelude == 1.*
                      , containers
+                     , directory
                      , lucid >= 2.9.5 && < 3
                      , microlens-platform
                      , mtl

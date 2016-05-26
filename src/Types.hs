@@ -177,7 +177,15 @@ sampleState = GlobalState {
               _wordReqWordsPerUser = 10 },
           _gameBegins = read "2016-06-03 12:20:06 UTC",
           _gameEnded = False,
-          _gamePlayers = [] } ],
+          _gamePlayers = [] },
+      Game {
+          _gameUid = Uid "game-boring-200",
+          _gameTitle = "Boring game",
+          _gameCreatedBy = Uid "user-cooler-100",
+          _gameWordReq = Nothing,
+          _gameBegins = read "2016-05-25 12:20:06 UTC",
+          _gameEnded = True,
+          _gamePlayers = [Uid "user-cooler-100"] } ],
   _dirty = True }
   where
     salt = Salt "*xxxPxxxxxx)xHL#nx~z2xPxxxxvxxx#"

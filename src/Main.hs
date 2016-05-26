@@ -23,6 +23,8 @@ import Lucid hiding (for_)
 import Data.Acid as Acid
 -- IO
 import System.IO
+import System.Directory
+
 
 -- Local
 import Types
@@ -63,6 +65,8 @@ createCheckpoint' db = liftIO $ do
 main :: IO ()
 main = do
   hSetBuffering stdout NoBuffering
+  do b <- doesDirectoryExist "state"
+     when b $ removeDirectoryRecursive "state"
   let prepare = openLocalStateFrom "state/" sampleState
       finalise db = do
         createCheckpoint' db
@@ -85,6 +89,8 @@ main = do
         creator <- dbQuery (GetUser (game^.createdBy))
         lucid $ do
           h1_ (toHtml (game^.title))
+          when (game^.ended) $ do
+            p_ $ strong_ "This game already ended."
           ul_ $ do
             li_ $ do "game begins at "
                      toHtml (show (game^.begins))
