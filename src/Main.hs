@@ -63,10 +63,6 @@ createCheckpoint' db = liftIO $ do
 main :: IO ()
 main = do
   hSetBuffering stdout NoBuffering
-  let emptyState = GlobalState {
-        _users = [],
-        _games = [],
-        _dirty = True }
   let prepare = openLocalStateFrom "state/" sampleState
       finalise db = do
         createCheckpoint' db

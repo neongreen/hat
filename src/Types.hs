@@ -25,10 +25,12 @@ module Types
   User(..),
     nick,
     name,
+    email,
     pass,
     admin,
   Game(..),
     title,
+    createdBy,
     begins,
     ended,
     players,
@@ -39,6 +41,7 @@ module Types
 
   -- * Common lenses
   uid,
+  created,
 
   -- * Stuff
   sampleState,
@@ -87,6 +90,8 @@ data User = User {
   _userUid :: Uid User,
   _userNick :: Text,
   _userName :: Text,
+  _userEmail :: Text,
+  _userCreated :: UTCTime,
   _userPass :: EncryptedPass,
   _userAdmin :: Bool }
   deriving (Show)
@@ -97,6 +102,7 @@ makeFields ''User
 data Game = Game {
   _gameUid :: Uid Game,
   _gameTitle :: Text,
+  _gameCreatedBy :: Uid User,
   _gameBegins :: UTCTime,
   _gameEnded :: Bool,
   _gamePlayers :: [Uid User] }
@@ -139,15 +145,18 @@ sampleState :: GlobalState
 sampleState = GlobalState {
   _users = [
       User {
-          _userUid = Uid "user100",
+          _userUid = Uid "user-cooler-100",
           _userNick = "cooler",
           _userName = "Mr. Cooler",
+          _userCreated = read "2016-05-20 12:20:06 UTC",
+          _userEmail = "cooler@gmail.com",
           _userPass = encryptPass' salt (Pass "password"),
           _userAdmin = True } ],
   _games = [
       Game {
           _gameUid = Uid "game100",
           _gameTitle = "Awesome game",
+          _gameCreatedBy = Uid "user-cooler-100",
           _gameBegins = read "2016-06-03 12:20:06 UTC",
           _gameEnded = False,
           _gamePlayers = [] } ],
