@@ -63,6 +63,11 @@ import BasePrelude
 import Control.Monad.State
 -- Lenses
 import Lens.Micro.Platform
+-- Containers
+import qualified Data.Map as M
+import Data.Map (Map)
+import qualified Data.Set as S
+import Data.Set (Set)
 -- Text
 import qualified Data.Text as T
 import Data.Text (Text)
@@ -99,10 +104,19 @@ data User = User {
 deriveSafeCopySimple 0 'base ''User
 makeFields ''User
 
+data WordReq = WordReq {
+  _wordReqUserWords :: Map (Uid User) (Set Text),
+  _wordReqWordsPerUser :: Int }
+  deriving (Show)
+
+deriveSafeCopySimple 0 'base ''WordReq
+makeFields ''WordReq
+
 data Game = Game {
   _gameUid :: Uid Game,
   _gameTitle :: Text,
   _gameCreatedBy :: Uid User,
+  _gameWordReq :: Maybe WordReq,
   _gameBegins :: UTCTime,
   _gameEnded :: Bool,
   _gamePlayers :: [Uid User] }
@@ -154,9 +168,13 @@ sampleState = GlobalState {
           _userAdmin = True } ],
   _games = [
       Game {
-          _gameUid = Uid "game100",
+          _gameUid = Uid "game-awesome-100",
           _gameTitle = "Awesome game",
           _gameCreatedBy = Uid "user-cooler-100",
+          _gameWordReq = Just $ WordReq {
+              _wordReqUserWords = M.fromList [
+                  (Uid "user-cooler-100", S.fromList ["hat"])],
+              _wordReqWordsPerUser = 10 },
           _gameBegins = read "2016-06-03 12:20:06 UTC",
           _gameEnded = False,
           _gamePlayers = [] } ],

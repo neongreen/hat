@@ -29,6 +29,7 @@ executable hat
                      , acid-state
                      , base >=4.8 && <5
                      , base-prelude == 1.*
+                     , containers
                      , lucid >= 2.9.5 && < 3
                      , microlens-platform
                      , mtl
