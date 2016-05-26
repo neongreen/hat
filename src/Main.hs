@@ -79,13 +79,22 @@ main = do
           h2_ "Available games"
           ul_ $ for_ (s ^. games) $ \game ->
             li_ $ mkLink (toHtml (game^.title))
-                         ("game/" <> uidToText (game^.uid))
+                         ("/game/" <> uidToText (game^.uid))
       Spock.get ("game" <//> var) $ \gameId -> do
         game <- dbQuery (GetGame gameId)
+        creator <- dbQuery (GetUser (game^.createdBy))
         lucid $ do
           h1_ (toHtml (game^.title))
-          p_ $ do
-            toHtml $ "game begins: " ++ show (game^.begins)
+          ul_ $ do
+            li_ $ do "game begins at "
+                     toHtml (show (game^.begins))
+            li_ $ do "created by "
+                     mkLink (toHtml (creator^.name))
+                            ("/user/" <> creator^.nick)
+      Spock.get ("user" <//> var) $ \nick' -> do
+        user <- dbQuery (GetUserByNick nick')
+        lucid $ do
+          h1_ $ toHtml $ user^.name <> " (aka " <> user^.nick <> ")"
 
 mkLink :: Monad m => HtmlT m a -> Url -> HtmlT m a
 mkLink x src = a_ [href_ src] x
