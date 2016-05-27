@@ -113,7 +113,6 @@ main = do
         s <- dbQuery GetGlobalState
         sess <- readSession
         lucidIO $ wrapPage sess s "Hat" $ do
-          h1_ "Hat"
           h2_ "Available games"
           ul_ $ for_ (s ^. games) $ \game ->
             li_ $ mkLink (toHtml (game^.title))
@@ -224,15 +223,22 @@ wrapPage sess gs pageTitle page = doctypehtml_ $ do
 
   body_ $ do
     script_ $ fromJS $ JS.createAjaxIndicator ()
-    div_ [id_ "main"] $ do
+    div_ [id_ "header"] $ do
+      a_ [class_ "logo", href_ "/"]
+        "Hat"
       case sess of
         Nothing -> do
-          mkLink "Log in" "/login"
-        Just u  -> do
-          let nick' = gs ^. userById u . nick
-          mkLink (toHtml nick') ("/user/" <> nick')
-          a_ [href_ "#", onclick_ (fromJS (JS.logout ()) <> "return false;")]
+          a_ [class_ "float-right header-nav", href_ "/login"]
+            "Log in"
+        Just u -> do
+          let user = gs ^. userById u
+          a_ [class_ "float-right header-nav", href_ "#",
+              onclick_ (fromJS (JS.logout ()) <> "return false;")]
             "Log out"
+          a_ [class_ "float-right header-nav",
+              href_ ("/user/" <> user^.nick)]
+            (toHtml (user^.name))
+    div_ [id_ "main"] $ do
       page
     div_ [id_ "footer"] $ do
       mapM_ (div_ [class_ "footer-item"]) $
@@ -301,6 +307,9 @@ gamePage gameId = do
           return ()  -- game has ended, nobody asked for words
         (_, Just req, False) -> wordsNeeded req
         (_, Just req, True) -> wordsWereNeeded req
+
+emptySpan :: Monad m => Text -> HtmlT m ()
+emptySpan w = span_ [style_ ("margin-left:" <> w)] mempty
 
 onFormSubmit :: (JS -> JS) -> Attribute
 onFormSubmit f = onsubmit_ $ format "{} return false;" [f (JS "this")]
