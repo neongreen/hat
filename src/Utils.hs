@@ -19,6 +19,9 @@ module Utils
   format,
   tshow,
 
+  -- * Lists
+  ordNub,
+
   -- * 'Eq'
   equating,
 
@@ -52,6 +55,8 @@ import Control.Monad.Trans
 import Control.Monad.Random
 -- Hashable (needed for Uid)
 import Data.Hashable
+-- Containers
+import qualified Data.Set as S
 -- Text
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -79,6 +84,13 @@ format f ps = TL.toStrict (Format.format f ps)
 
 tshow :: Show a => a -> Text
 tshow = T.pack . show
+
+ordNub :: Ord a => [a] -> [a]
+ordNub = go mempty
+  where
+    go _ [] = []
+    go s (x:xs) | x `S.member` s = go s xs
+                | otherwise      = x : go (S.insert x s) xs
 
 equating :: Eq b => (a -> b) -> (a -> a -> Bool)
 equating f = (==) `on` f

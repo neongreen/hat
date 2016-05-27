@@ -29,7 +29,8 @@ executable hat
     Types
     Utils
     JS
-  build-depends:       Spock
+  build-depends:       MonadRandom
+                     , Spock
                      , Spock-lucid == 0.2.*
                      , acid-state
                      , base >=4.8 && <5
@@ -37,18 +38,19 @@ executable hat
                      , containers
                      , directory
                      , hashable
-                     , text-format
-                     , MonadRandom
-                     , neat-interpolation
+                     , ilist
                      , lucid >= 2.9.5 && < 3
                      , microlens-platform
                      , mtl
+                     , neat-interpolation
                      , path-pieces
                      , safecopy
                      , scrypt
                      , text
+                     , text-format
                      , time
                      , transformers
+                     , vector
                      , wai-middleware-static
   ghc-options:         -Wall -fno-warn-unused-do-bind
   hs-source-dirs:      src

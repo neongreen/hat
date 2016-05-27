@@ -2,6 +2,7 @@
 OverloadedStrings,
 QuasiQuotes,
 TypeFamilies,
+TupleSections,
 NoImplicitPrelude
   #-}
 
@@ -12,7 +13,7 @@ module Main (main) where
 -- General
 import BasePrelude
 -- Lenses
-import Lens.Micro.Platform
+import Lens.Micro.Platform hiding ((&))
 -- Monads
 import Control.Monad.IO.Class
 import Control.Monad.Random
@@ -21,8 +22,14 @@ import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
 import Data.Text (Text)
 import NeatInterpolation
+-- Lists
+import Data.List.Index
+-- Vector
+import qualified Data.Vector.Unboxed as U
 -- Containers
 import qualified Data.Set as S
+import qualified Data.Map as M
+import qualified Data.IntMap as IM
 -- Web
 import Web.Spock hiding (head, get, text)
 import qualified Web.Spock as Spock
@@ -209,12 +216,12 @@ wrapPage sess gs pageTitle page = doctypehtml_ $ do
               "https://github.com/neongreen/hat/issues");
         return false; };
       |]
-    includeJS "/jquery-2.2.0.min.js"
+    includeJS "/jquery.js"
     -- See Note [autosize]
-    includeJS "/autosize-3.0.15.min.js"
+    includeJS "/autosize.js"
     onPageLoad (JS "autosize($('textarea'));")
     includeCSS "/normalize.css"
-    includeCSS "/milligram.min.css"
+    includeCSS "/milligram.css"
     includeCSS "/css.css"
     includeCSS "/loader.css"
     -- Include definitions of all Javascript functions that we have defined
@@ -252,3 +259,60 @@ onPageLoad js = script_ $ format "$(document).ready(function(){{}});" [js]
 
 mkLink :: Monad m => HtmlT m a -> Url -> HtmlT m a
 mkLink x src = a_ [href_ src] x
+
+rateSolution
+  :: Int                  -- ^ Player count
+  -> U.Vector (Int, Int)  -- ^ Past games
+  -> U.Vector (Int, Int)  -- ^ Solution
+  -> [(Int, Double)]
+rateSolution pc past future =
+  sort . map rate . IM.elems $
+  U.ifoldl (\mp turn (a, b) -> mp & ix a %~ (turn:) & ix b %~ (turn:))
+           (IM.fromList (map (, []) [0..pc-1]))
+           (past <> future)
+  where
+    rate ls =
+      let ds = zipWith (-) ls (tail ls)
+      in if null ds
+           then (0, 0)
+           else (minimum ds, fromIntegral (sum ds) / fromIntegral (length ds))
+
+printRating :: [(Int, Double)] -> IO ()
+printRating xs = mapM_ (\(a,s) -> printf "%d/%.2f " a s) xs >> putStrLn ""
+
+-- https://en.wikipedia.org/wiki/Simulated_annealing
+findSchedule
+  :: Int                          -- ^ Player count
+  -> U.Vector (Int, Int)          -- ^ Past games
+  -> Int                          -- ^ Iterations
+  -> IO (U.Vector (Int, Int))     -- ^ Solution
+findSchedule pc past kmax =
+  if U.null future then return past
+    else go (future, rfuture) (future, rfuture) kmax
+  where
+    future = U.fromList $
+      [(x, y) | x <- [0..pc-1], y <- [0..pc-1], x/=y] \\ U.toList past
+    rfuture = rateSolution pc past future
+    rate :: [(Int, Double)] -> Double
+    rate xs = sum (imap (\i (m,s) -> 0.9^^i * fromIntegral m * s) xs)
+            * fromIntegral (fst (head xs))^(2::Int)
+    p e e' t = if e' > e then 1 else exp (-(rate e - rate e')/t)
+    go _       (sbest, _)      0 = return sbest
+    go (s, rs) (sbest, rsbest) k = do
+      s' <- swap2 s
+      let t = 0.9999^^(kmax-k)
+          rs' = rateSolution pc past s'
+      rnd <- randomIO
+      let (sbest', rsbest')
+            | rs' > rsbest = (s', rs')
+            | otherwise    = (sbest, rsbest)
+      if p rs rs' t >= rnd
+        then go (s', rs') (sbest', rsbest') (k-1)
+        else go (s , rs ) (sbest', rsbest') (k-1)
+
+swap2 :: U.Unbox a => U.Vector a -> IO (U.Vector a)
+swap2 xs = do
+  let len = U.length xs
+  i <- randomRIO (0, len-1)
+  j <- randomRIO (0, len-1)
+  return (U.unsafeUpd xs [(i, U.unsafeIndex xs j), (j, U.unsafeIndex xs i)])
