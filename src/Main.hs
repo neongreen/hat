@@ -111,49 +111,35 @@ main = do
           ul_ $ for_ (s ^. games) $ \game ->
             li_ $ mkLink (toHtml (game^.title))
                          ("/game/" <> uidToText (game^.uid))
-      Spock.get ("game" <//> var) $ \gameId -> do
-        s <- dbQuery GetGlobalState
+      Spock.post ("game" <//> var <//> "words" <//> "submit") $ \gameId -> do
         sess <- readSession
         game <- dbQuery (GetGame gameId)
-        creator <- dbQuery (GetUser (game^.createdBy))
-        lucidIO $ wrapPage sess s ((game^.title) <> " | Hat") $ do
-          h1_ (toHtml (game^.title))
-          when (game^.ended) $ do
-            p_ $ strong_ "This game already ended."
-          ul_ $ do
-            li_ $ do "game begins at "
-                     toHtml (show (game^.begins))
-            li_ $ do "created by "
-                     mkLink (toHtml (creator^.name))
-                            ("/user/" <> creator^.nick)
-          for_ sess $ \u -> do
-            case (S.member u (game^.players), game^.wordReq, game^.ended) of
-              -- the game is on but the user isn't participating
-              (False, _, False) ->
-                p_ "You aren't participating in this game yet."
-              -- the game has ended
-              (False, _, True) ->
-                p_ "You didn't participate in this game."
-              -- the game is on, the user doesn't have to propose anything
-              (_, Nothing, False) ->
-                p_ "You don't have to propose words for this game."
-              -- the game has ended, the user didn't have to propose anything
-              (_, Nothing, True) ->
-                return ()
-              -- the game is on, the user has to propose words
-              (_, Just req, False) -> do
-                case req^.userWords.at u of
-                  Nothing -> p_ "You can propose words for this game."
-                  Just ws -> do
-                    p_ "Your proposed words for the game are:"
-                    for_ ws $ \w -> li_ (toHtml w)
-              -- the game has ended, the user had to propose words
-              (_, Just req, True) -> do
-                case req^.userWords.at u of
-                  Nothing -> p_ "You didn't propose words for this game."
-                  Just ws -> do
-                    p_ "Your proposed words for the game were:"
-                    for_ ws $ \w -> li_ (toHtml w)
+        ws <- T.words <$> param' "words"
+        u <- case sess of
+          Just u  -> return u
+          Nothing -> jsonFail "You're not logged in"
+        req <- case game^.wordReq of
+          Just req -> return req
+          Nothing  -> jsonFail "Words aren't required for this game"
+        when (u `S.notMember` (game^.players)) $
+          jsonFail "You aren't participating in this game"
+        when (isJust (req^.userWords.at u)) $
+          jsonFail "You have already submitted words"
+        when (length (ordNub ws) < length ws) $
+          jsonFail "Your list of words contains duplicates"
+        when (any (T.any (== ',')) ws) $
+          jsonFail "Punctuation isn't allowed"
+        when (length ws < req^.wordsPerUser) $
+          jsonFail $ format "You entered only {} word{}"
+            (length ws, if length ws == 1 then "" else "s" :: Text)
+        when (length ws > req^.wordsPerUser) $
+          jsonFail $ format "You entered {} words, that's too many"
+            [length ws]
+        -- All checks passed
+        dbUpdate (SetWords gameId u ws)
+        jsonSuccess
+      Spock.get ("game" <//> var) $ \gameId ->
+        gamePage gameId
       Spock.get ("user" <//> var) $ \nick' -> do
         s <- dbQuery GetGlobalState
         sess <- readSession
@@ -186,11 +172,11 @@ main = do
         pass' <- Pass . T.encodeUtf8 <$> param' "pass"
         mbUser <- dbQuery (GetUserByNick' nick')
         case mbUser of
-          Nothing   -> json (False, "User not found" :: Text)
+          Nothing   -> jsonFail "User not found"
           Just user -> case verifyPass' pass' (user^.pass) of
-            False -> json (False, "Incorrect password" :: Text)
+            False -> jsonFail "Incorrect password"
             True  -> do writeSession (Just (user^.uid))
-                        json (True, "" :: Text)
+                        jsonSuccess
       Spock.post "logout" $ do
         writeSession Nothing
 
@@ -251,6 +237,65 @@ wrapPage sess gs pageTitle page = doctypehtml_ $ do
              mkLink "issue tracker" "https://github.com/neongreen/hat/issues"
         ]
 
+gamePage
+  :: Uid Game
+  -> ActionCtxT ctx (WebStateM () (Maybe (Uid User)) ServerState) ()
+gamePage gameId = do
+  s <- dbQuery GetGlobalState
+  sess <- readSession
+  game <- dbQuery (GetGame gameId)
+  creator <- dbQuery (GetUser (game^.createdBy))
+  lucidIO $ wrapPage sess s ((game^.title) <> " | Hat") $ do
+    h1_ (toHtml (game^.title))
+    when (game^.ended) $ do
+      p_ $ strong_ "This game already ended."
+    ul_ $ do
+      li_ $ do "game begins at "
+               toHtml (show (game^.begins))
+      li_ $ do "created by "
+               mkLink (toHtml (creator^.name))
+                      ("/user/" <> creator^.nick)
+
+    for_ sess $ \u -> do
+      -- the game is on, the user has to propose words
+      let wordsNeeded req = case req^.userWords.at u of
+            Just ws -> do
+              p_ "Your proposed words for the game are:"
+              blockquote_ (toHtml (T.unwords (S.toList ws)))
+            Nothing -> do
+              p_ $ do
+                "Propose " >> strong_ (toHtml (show (req^.wordsPerUser)))
+                " words for this game. Once you submit them, you won't"
+                " be able to edit them, so choose carefully."
+              errorId <- randomLongUid
+              let formSubmitHandler formNode =
+                    JS.submitWords (JS.selectUid errorId, gameId, formNode)
+              form_ [onFormSubmit formSubmitHandler] $ do
+                let plh = format "{} space-separated words"
+                                 [req^.wordsPerUser]
+                textarea_ [name_ "words", placeholder_ plh] ""
+                input_ [type_ "submit", value_ "Submit"]
+              div_ [uid_ errorId, style_ "display:none"] ""
+      -- the game has ended, the user had to propose words
+      let wordsWereNeeded req = case req^.userWords.at u of
+            Nothing ->
+              p_ "You didn't propose words for this game."
+            Just ws -> do
+              p_ "Your proposed words for the game were:"
+              for_ ws $ \w -> li_ (toHtml w)
+
+      case (S.member u (game^.players), game^.wordReq, game^.ended) of
+        (False, _, False) ->
+          p_ "You aren't participating in this game yet."
+        (False, _, True) ->
+          p_ "You didn't participate in this game."
+        (_, Nothing, False) ->
+          p_ "You don't have to propose words for this game."
+        (_, Nothing, True) ->
+          return ()  -- game has ended, nobody asked for words
+        (_, Just req, False) -> wordsNeeded req
+        (_, Just req, True) -> wordsWereNeeded req
+
 onFormSubmit :: (JS -> JS) -> Attribute
 onFormSubmit f = onsubmit_ $ format "{} return false;" [f (JS "this")]
 
@@ -259,6 +304,12 @@ onPageLoad js = script_ $ format "$(document).ready(function(){{}});" [js]
 
 mkLink :: Monad m => HtmlT m a -> Url -> HtmlT m a
 mkLink x src = a_ [href_ src] x
+
+jsonFail :: MonadIO m => Text -> ActionCtxT ctx m a
+jsonFail x = json (False, x)
+
+jsonSuccess :: MonadIO m => ActionCtxT ctx m a
+jsonSuccess = json (True, "" :: Text)
 
 rateSolution
   :: Int                  -- ^ Player count

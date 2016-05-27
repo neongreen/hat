@@ -52,6 +52,7 @@ module Types
   GetUser(..),
   GetUserByNick(..), GetUserByNick'(..),
   GetGame(..),
+  SetWords(..),
   SetDirty(..),
   UnsetDirty(..),
 )
@@ -65,7 +66,6 @@ import Control.Monad.State
 -- Lenses
 import Lens.Micro.Platform
 -- Containers
-import qualified Data.Map as M
 import Data.Map (Map)
 import qualified Data.Set as S
 import Data.Set (Set)
@@ -169,8 +169,7 @@ sampleState = GlobalState {
           _gameTitle = "Awesome game",
           _gameCreatedBy = "user-cooler-100",
           _gameWordReq = Just $ WordReq {
-              _wordReqUserWords = M.fromList [
-                  ("user-cooler-100", S.fromList ["hat"])],
+              _wordReqUserWords = mempty,
               _wordReqWordsPerUser = 10 },
           _gameBegins = read "2016-06-03 12:20:06 UTC",
           _gameEnded = False,
@@ -208,6 +207,10 @@ getUserByNick' nick' = preview (userByNick' nick')
 getGame :: Uid Game -> Acid.Query GlobalState Game
 getGame uid' = view (gameById uid')
 
+setWords :: Uid Game -> Uid User -> [Text] -> Acid.Update GlobalState ()
+setWords gameId userId ws =
+  gameById gameId.wordReq._Just.userWords.at userId .= Just (S.fromList ws)
+
 setDirty :: Acid.Update GlobalState ()
 setDirty = dirty .= True
 
@@ -219,5 +222,6 @@ makeAcidic ''GlobalState [
   'getUser,
   'getUserByNick, 'getUserByNick',
   'getGame,
+  'setWords,
   'setDirty, 'unsetDirty
   ]

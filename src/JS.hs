@@ -43,7 +43,9 @@ allJSFunctions = JS . T.unlines . map fromJS $ [
   autosizeTextarea,
   -- Login
   tryLogin,
-  logout ]
+  logout,
+  -- Other
+  submitWords ]
 
 -- | A class for things that can be converted to Javascript syntax.
 class ToJS a where toJS :: a -> JS
@@ -261,6 +263,21 @@ logout =
     $.post("/logout")
      .done(function () {
         location.reload();
+     });
+  |]
+
+submitWords :: JSFunction a => a
+submitWords =
+  makeJSFunction "submitWords" ["errorNode", "gameId", "form"]
+  [text|
+    $.post("/game/" + gameId + "/words/submit", $(form).serialize())
+     .done(function (data) {
+        if (data[0]) {
+          $(errorNode).hide();
+          location.reload(); }
+        else {
+          $(errorNode).text(data[1]);
+          $(errorNode).show(); }
      });
   |]
 
