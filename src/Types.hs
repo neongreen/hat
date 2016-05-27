@@ -18,6 +18,7 @@ NoImplicitPrelude
 module Types
 (
   -- * Types
+  Session,
   User(..),
     nick,
     name,
@@ -37,6 +38,7 @@ module Types
   GlobalState(..),
     games,
     users,
+    sessions,
     dirty,
 
   -- * Common lenses
@@ -49,6 +51,7 @@ module Types
 
   -- * Methods
   GetGlobalState(..),
+  GetSessions(..), SetSessions(..),
   GetUser(..),
   GetUserByNick(..), GetUserByNick'(..),
   GetGame(..),
@@ -74,6 +77,8 @@ import qualified Data.Text as T
 import Data.Text (Text)
 -- Time
 import Data.Time
+-- Web
+import Web.Spock (SessionId)
 -- acid-state
 import Data.Acid as Acid
 import Data.SafeCopy
@@ -98,6 +103,8 @@ data User = User {
 deriveSafeCopySimple 0 'base ''User
 makeFields ''User
 
+type Session = Maybe (Uid User)
+
 data WordReq = WordReq {
   _wordReqUserWords :: Map (Uid User) (Set Text),
   _wordReqWordsPerUser :: Int }
@@ -120,9 +127,10 @@ deriveSafeCopySimple 0 'base ''Game
 makeFields ''Game
 
 data GlobalState = GlobalState {
-  _users :: [User],
-  _games :: [Game],
-  _dirty :: Bool }
+  _users    :: [User],
+  _games    :: [Game],
+  _sessions :: [(SessionId, UTCTime, Session)],
+  _dirty    :: Bool }
   deriving (Show)
 
 deriveSafeCopySimple 0 'base ''GlobalState
@@ -182,6 +190,7 @@ sampleState = GlobalState {
           _gameBegins = read "2016-05-25 12:20:06 UTC",
           _gameEnded = True,
           _gamePlayers = mempty } ],
+  _sessions = [],
   _dirty = True }
   where
     salt = Salt "*xxxPxxxxxx)xHL#nx~z2xPxxxxvxxx#"
@@ -194,6 +203,12 @@ infix 4 <<.=
 
 getGlobalState :: Acid.Query GlobalState GlobalState
 getGlobalState = view id
+
+getSessions :: Acid.Query GlobalState [(SessionId, UTCTime, Session)]
+getSessions = view sessions
+
+setSessions :: [(SessionId, UTCTime, Session)] -> Acid.Update GlobalState ()
+setSessions x = sessions .= x
 
 getUser :: Uid User -> Acid.Query GlobalState User
 getUser uid' = view (userById uid')
@@ -219,6 +234,7 @@ unsetDirty = dirty <<.= False
 
 makeAcidic ''GlobalState [
   'getGlobalState,
+  'getSessions, 'setSessions,
   'getUser,
   'getUserByNick, 'getUserByNick',
   'getGame,

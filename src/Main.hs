@@ -40,7 +40,6 @@ import Network.Wai.Middleware.Static (staticPolicy, addBase)
 import Data.Acid as Acid
 -- IO
 import System.IO
-import System.Directory
 -- Passwords
 import Crypto.Scrypt
 
@@ -87,8 +86,6 @@ createCheckpoint' db = liftIO $ do
 main :: IO ()
 main = do
   hSetBuffering stdout NoBuffering
-  do b <- doesDirectoryExist "state"
-     when b $ removeDirectoryRecursive "state"
   let prepare = openLocalStateFrom "state/" sampleState
       finalise db = do
         createCheckpoint' db
@@ -96,7 +93,17 @@ main = do
   bracket prepare finalise $ \db -> do
     let serverState = ServerState {
           _db = db }
-    let spockConfig = defaultSpockCfg Nothing PCNoDatabase serverState
+    let spockConfig = (defaultSpockCfg Nothing PCNoDatabase serverState) {
+          spc_sessionCfg = (defaultSessionCfg Nothing) {
+            sc_housekeepingInterval = 10, -- seconds
+            sc_persistCfg = Just SessionPersistCfg {
+              spc_load = Acid.query db GetSessions,
+              -- this will be called every housekeeping_Interval
+              spc_store = \ss -> do
+                ssOld <- Acid.query db GetSessions
+                when (ss /= ssOld) $ do
+                  Acid.update db SetDirty
+                  Acid.update db (SetSessions ss) } } }
     runSpock 7070 $ spock spockConfig $ do
       middleware (staticPolicy (addBase "static"))
       Spock.get "/js.js" $ do
