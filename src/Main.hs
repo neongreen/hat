@@ -271,8 +271,7 @@ gamePage gameId = do
               let formSubmitHandler formNode =
                     JS.submitWords (JS.selectUid errorId, gameId, formNode)
               form_ [onFormSubmit formSubmitHandler] $ do
-                let plh = format "{} space-separated words"
-                                 [req^.wordsPerUser]
+                let plh = "Separate words with spaces"
                 textarea_ [name_ "words", placeholder_ plh] ""
                 input_ [type_ "submit", value_ "Submit"]
               div_ [uid_ errorId, style_ "display:none"] ""
