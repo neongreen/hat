@@ -52,6 +52,7 @@ module Types
   -- * Methods
   GetGlobalState(..),
   GetSessions(..), SetSessions(..),
+  AddUser(..),
   GetUser(..),
   GetUserByNick(..), GetUserByNick'(..),
   GetGame(..),
@@ -210,6 +211,26 @@ getSessions = view sessions
 setSessions :: [(SessionId, UTCTime, Session)] -> Acid.Update GlobalState ()
 setSessions x = sessions .= x
 
+addUser
+  :: Uid User       -- ^ New user's uid
+  -> Text           -- ^ Nick
+  -> Text           -- ^ Name
+  -> EncryptedPass  -- ^ Pass
+  -> Text           -- ^ Email
+  -> UTCTime        -- ^ Creation time
+  -> Acid.Update GlobalState User
+addUser uid' nick' name' pass' email' now = do
+  let user = User {
+        _userUid = uid',
+        _userNick = nick',
+        _userName = name',
+        _userEmail = email',
+        _userCreated = now,
+        _userPass = pass',
+        _userAdmin = False }
+  users %= (user:)
+  return user
+
 getUser :: Uid User -> Acid.Query GlobalState User
 getUser uid' = view (userById uid')
 
@@ -235,6 +256,7 @@ unsetDirty = dirty <<.= False
 makeAcidic ''GlobalState [
   'getGlobalState,
   'getSessions, 'setSessions,
+  'addUser,
   'getUser,
   'getUserByNick, 'getUserByNick',
   'getGame,

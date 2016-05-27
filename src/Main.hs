@@ -3,6 +3,7 @@ OverloadedStrings,
 QuasiQuotes,
 TypeFamilies,
 TupleSections,
+FlexibleContexts,
 NoImplicitPrelude
   #-}
 
@@ -35,11 +36,14 @@ import Web.Spock hiding (head, get, text)
 import qualified Web.Spock as Spock
 import Web.Spock.Lucid
 import Lucid hiding (for_)
+import qualified Lucid
 import Network.Wai.Middleware.Static (staticPolicy, addBase)
 -- acid-state
 import Data.Acid as Acid
 -- IO
 import System.IO
+-- Time
+import Data.Time
 -- Passwords
 import Crypto.Scrypt
 
@@ -151,20 +155,20 @@ main = do
         sess <- readSession
         user <- dbQuery (GetUserByNick nick')
         lucidIO $ wrapPage sess s ((user^.name) <> " | Hat") $ do
-          h1_ $ toHtml $ user^.name <> " (aka " <> user^.nick <> ")"
+          h2_ $ toHtml $ user^.name <> " (aka " <> user^.nick <> ")"
       Spock.get "admin" $ do
         s <- dbQuery GetGlobalState
         sess <- readSession
         lucidIO $ wrapPage sess s "Admin | Hat" $ do
-          h1_ "Admin stuff"
-          h2_ "List of users"
+          h2_ "Admin stuff"
+          h3_ "List of users"
           ul_ $ for_ (s^.users) $ \user -> li_ $ do
             mkLink (toHtml (user^.name))
                    ("/user/" <> user^.nick)
       Spock.get "login" $ do
         s <- dbQuery GetGlobalState
         sess <- readSession
-        lucidIO $ wrapPage sess s "Login | Hat" $ do
+        lucidIO $ wrapPage sess s "Log in | Hat" $ do
           errorId <- randomLongUid
           let formSubmitHandler formNode =
                 JS.tryLogin (JS.selectUid errorId, formNode)
@@ -183,6 +187,79 @@ main = do
             False -> jsonFail "Incorrect password"
             True  -> do writeSession (Just (user^.uid))
                         jsonSuccess
+      Spock.get "signup" $ do
+        s <- dbQuery GetGlobalState
+        sess <- readSession
+        lucidIO $ wrapPage sess s "Sign up | Hat" $ do
+          case sess of
+            Just _ -> p_ "You are already logged in."
+            Nothing -> do
+              let formSubmitHandler formNode =
+                    JS.trySignup [formNode]
+              form_ [onFormSubmit formSubmitHandler] $ do
+                let errorSpan = span_ [class_ "float-right label-err"] ""
+                fieldset_ $ do
+                  label_ [Lucid.for_ "name"] $ do
+                    "Name"
+                    errorSpan
+                  input_ [type_ "text", name_ "name"]
+                  label_ [Lucid.for_ "nick"] $ do
+                    "Nickname (letters, digits, _-.)"
+                    errorSpan
+                  input_ [type_ "text", name_ "nick"]
+                fieldset_ $ do
+                  label_ [Lucid.for_ "pass"] $ do
+                    "Password"
+                    errorSpan
+                  input_ [type_ "password", name_ "pass"]
+                  label_ [Lucid.for_ "pass2"] $ do
+                    "Password again"
+                    errorSpan
+                  input_ [type_ "password", name_ "pass2"]
+                fieldset_ $ do
+                  label_ [Lucid.for_ "email"] $ do
+                    "Email (just in case)"
+                    errorSpan
+                  input_ [type_ "email", name_ "email"]
+                input_ [type_ "submit", value_ "Sign up"]
+                a_ [class_ "button button-clear",
+                    href_ "http://imgur.com/r/blep/hvk4r7x",
+                    target_ "_blank"]
+                  "Show me cats with stuck-out tongues instead"
+      Spock.post "signup" $ do
+        nick'  <- param' "nick"
+        name'  <- param' "name"
+        pass'  <- param' "pass"
+        pass2' <- param' "pass2"
+        email' <- param' "email"
+        -- Validating the form
+        let jsonFail2 f err = json (False, f::Text, err::Text)
+        -- name
+        when (T.null name') $
+          jsonFail2 "name" "Can't be empty"
+        -- nick
+        when (T.null nick') $
+          jsonFail2 "nick" "Can't be empty"
+        mbUser <- dbQuery (GetUserByNick' nick')
+        when (isJust mbUser) $
+          jsonFail2 "nick" "This nickname is taken"
+        unless (T.all (\c -> isAlphaNum c || c `elem` ['.','-','_']) nick') $
+          jsonFail2 "nick" "Contains forbidden characters"
+        -- passwords
+        when (T.null pass') $
+          jsonFail2 "pass" "Can't be empty"
+        when (pass' /= pass2') $
+          jsonFail2 "pass" "Passwords don't match"
+        -- email
+        when (T.null email') $
+          jsonFail2 "email" "Can't be empty"
+        -- Success
+        uid' <- randomShortUid
+        encPass <- liftIO $ encryptPassIO' (Pass (T.encodeUtf8 pass'))
+        now <- liftIO getCurrentTime
+        user <- dbUpdate (AddUser uid' nick' name' encPass email' now)
+        writeSession (Just (user^.uid))
+        jsonSuccess
       Spock.post "logout" $ do
         writeSession Nothing
 
@@ -228,6 +305,8 @@ wrapPage sess gs pageTitle page = doctypehtml_ $ do
         "Hat"
       case sess of
         Nothing -> do
+          a_ [class_ "float-right header-nav", href_ "/signup"]
+            "Sign up"
           a_ [class_ "float-right header-nav", href_ "/login"]
             "Log in"
         Just u -> do
@@ -259,7 +338,7 @@ gamePage gameId = do
   game <- dbQuery (GetGame gameId)
   creator <- dbQuery (GetUser (game^.createdBy))
   lucidIO $ wrapPage sess s ((game^.title) <> " | Hat") $ do
-    h1_ (toHtml (game^.title))
+    h2_ (toHtml (game^.title))
     when (game^.ended) $ do
       p_ $ strong_ "This game already ended."
     ul_ $ do

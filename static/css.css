@@ -20,7 +20,7 @@ body {
 #header {
   border-bottom: 1px solid #606c76;
   margin-bottom: 3em;
-  padding: 1.5em 1em 0.8em 1em; }
+  padding: 1.5em 1em 0.8em 0.8em; }
 
 .logo {
   font-size: 4rem; }
@@ -54,6 +54,9 @@ body {
 
 form {
   margin: 0; }
+
+.label-err {
+  color: #CC3752; }
 
 .fullwidth {
   width: 100%; }

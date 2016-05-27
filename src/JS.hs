@@ -41,7 +41,8 @@ allJSFunctions = JS . T.unlines . map fromJS $ [
   -- Misc
   createAjaxIndicator,
   autosizeTextarea,
-  -- Login
+  -- Signup/login
+  trySignup,
   tryLogin,
   logout,
   -- Other
@@ -239,6 +240,22 @@ autosizeTextarea =
   [text|
     autosize(textareaNode);
     autosize.update(textareaNode);
+  |]
+
+trySignup :: JSFunction a => a
+trySignup =
+  makeJSFunction "trySignup" ["form"]
+  [text|
+    $.post("/signup", $(form).serialize())
+     .done(function (data) {
+        if (data[0]) {
+          window.location.href = "/"; }
+        else {
+          $(form).find("label").find("span").text("");
+          $(form).find("[name="+data[1]+"]")
+                 .prev().find("span").text(data[2]);
+        }
+     });
   |]
 
 tryLogin :: JSFunction a => a
