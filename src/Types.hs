@@ -17,11 +17,7 @@ NoImplicitPrelude
 
 module Types
 (
-  -- * Common types
-  Uid(..),
-  Url,
-
-  -- * Specific types
+  -- * Types
   User(..),
     nick,
     name,
@@ -45,11 +41,12 @@ module Types
 
   -- * Stuff
   sampleState,
+  userById,
 
   -- * Methods
   GetGlobalState(..),
   GetUser(..),
-  GetUserByNick(..),
+  GetUserByNick(..), GetUserByNick'(..),
   GetGame(..),
   SetDirty(..),
   UnsetDirty(..),
@@ -73,23 +70,16 @@ import qualified Data.Text as T
 import Data.Text (Text)
 -- Time
 import Data.Time
--- Web
-import Web.PathPieces
 -- acid-state
 import Data.Acid as Acid
 import Data.SafeCopy
 -- Passwords
 import Crypto.Scrypt
 
+-- Local
+import Utils
 
-deriveSafeCopySimple 0 'base ''EncryptedPass
 
-newtype Uid a = Uid {uidToText :: Text}
-  deriving (Eq, Ord, Show, PathPiece)
-
-deriveSafeCopySimple 0 'base ''Uid
-
-type Url = Text
 
 data User = User {
   _userUid :: Uid User,
@@ -145,9 +135,12 @@ userById uid' = singular $
 
 userByNick :: Text -> Lens' GlobalState User
 userByNick nick' = singular $
-  users.each . filtered ((== nick') . view nick) `failing`
+  userByNick' nick' `failing`
   error ("userById: couldn't find user with nick " ++
          T.unpack nick')
+
+userByNick' :: Text -> Traversal' GlobalState User
+userByNick' nick' = users.each . filtered ((== nick') . view nick)
 
 gameById :: Uid Game -> Lens' GlobalState Game
 gameById uid' = singular $
@@ -159,7 +152,7 @@ sampleState :: GlobalState
 sampleState = GlobalState {
   _users = [
       User {
-          _userUid = Uid "user-cooler-100",
+          _userUid = "user-cooler-100",
           _userNick = "cooler",
           _userName = "Mr. Cooler",
           _userCreated = read "2016-05-20 12:20:06 UTC",
@@ -168,24 +161,24 @@ sampleState = GlobalState {
           _userAdmin = True } ],
   _games = [
       Game {
-          _gameUid = Uid "game-awesome-100",
+          _gameUid = "game-awesome-100",
           _gameTitle = "Awesome game",
-          _gameCreatedBy = Uid "user-cooler-100",
+          _gameCreatedBy = "user-cooler-100",
           _gameWordReq = Just $ WordReq {
               _wordReqUserWords = M.fromList [
-                  (Uid "user-cooler-100", S.fromList ["hat"])],
+                  ("user-cooler-100", S.fromList ["hat"])],
               _wordReqWordsPerUser = 10 },
           _gameBegins = read "2016-06-03 12:20:06 UTC",
           _gameEnded = False,
           _gamePlayers = [] },
       Game {
-          _gameUid = Uid "game-boring-200",
+          _gameUid = "game-boring-200",
           _gameTitle = "Boring game",
-          _gameCreatedBy = Uid "user-cooler-100",
+          _gameCreatedBy = "user-cooler-100",
           _gameWordReq = Nothing,
           _gameBegins = read "2016-05-25 12:20:06 UTC",
           _gameEnded = True,
-          _gamePlayers = [Uid "user-cooler-100"] } ],
+          _gamePlayers = ["user-cooler-100"] } ],
   _dirty = True }
   where
     salt = Salt "*xxxPxxxxxx)xHL#nx~z2xPxxxxvxxx#"
@@ -205,6 +198,9 @@ getUser uid' = view (userById uid')
 getUserByNick :: Text -> Acid.Query GlobalState User
 getUserByNick nick' = view (userByNick nick')
 
+getUserByNick' :: Text -> Acid.Query GlobalState (Maybe User)
+getUserByNick' nick' = preview (userByNick' nick')
+
 getGame :: Uid Game -> Acid.Query GlobalState Game
 getGame uid' = view (gameById uid')
 
@@ -217,7 +213,7 @@ unsetDirty = dirty <<.= False
 makeAcidic ''GlobalState [
   'getGlobalState,
   'getUser,
-  'getUserByNick,
+  'getUserByNick, 'getUserByNick',
   'getGame,
   'setDirty, 'unsetDirty
   ]
