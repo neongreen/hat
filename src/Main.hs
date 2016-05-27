@@ -17,9 +17,12 @@ import Lens.Micro.Platform
 import Control.Monad.IO.Class
 import Control.Monad.Random
 -- Text
+import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
 import Data.Text (Text)
 import NeatInterpolation
+-- Containers
+import qualified Data.Set as S
 -- Web
 import Web.Spock hiding (head, get, text)
 import qualified Web.Spock as Spock
@@ -116,6 +119,34 @@ main = do
             li_ $ do "created by "
                      mkLink (toHtml (creator^.name))
                             ("/user/" <> creator^.nick)
+          for_ sess $ \u -> do
+            case (S.member u (game^.players), game^.wordReq, game^.ended) of
+              -- the game is on but the user isn't participating
+              (False, _, False) ->
+                p_ "You aren't participating in this game yet."
+              -- the game has ended
+              (False, _, True) ->
+                p_ "You didn't participate in this game."
+              -- the game is on, the user doesn't have to propose anything
+              (_, Nothing, False) ->
+                p_ "You don't have to propose words for this game."
+              -- the game has ended, the user didn't have to propose anything
+              (_, Nothing, True) ->
+                return ()
+              -- the game is on, the user has to propose words
+              (_, Just req, False) -> do
+                case req^.userWords.at u of
+                  Nothing -> p_ "You can propose words for this game."
+                  Just ws -> do
+                    p_ "Your proposed words for the game are:"
+                    for_ ws $ \w -> li_ (toHtml w)
+              -- the game has ended, the user had to propose words
+              (_, Just req, True) -> do
+                case req^.userWords.at u of
+                  Nothing -> p_ "You didn't propose words for this game."
+                  Just ws -> do
+                    p_ "Your proposed words for the game were:"
+                    for_ ws $ \w -> li_ (toHtml w)
       Spock.get ("user" <//> var) $ \nick' -> do
         s <- dbQuery GetGlobalState
         sess <- readSession
@@ -207,8 +238,9 @@ wrapPage sess gs pageTitle page = doctypehtml_ $ do
       mapM_ (div_ [class_ "footer-item"]) $
         [ do "made by "
              mkLink "Artyom" "https://artyom.me"
+        , do mkLink "DDRaniki 2016" "https://vk.com/ddraniki"
         , do mkLink "source" "https://github.com/neongreen/hat"
-             "/"
+             " / "
              mkLink "issue tracker" "https://github.com/neongreen/hat/issues"
         ]
 

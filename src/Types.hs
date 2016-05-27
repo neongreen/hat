@@ -24,12 +24,16 @@ module Types
     email,
     pass,
     admin,
+  WordReq(..),
+    userWords,
+    wordsPerUser,
   Game(..),
     title,
     createdBy,
     begins,
     ended,
     players,
+    wordReq,
   GlobalState(..),
     games,
     users,
@@ -109,7 +113,7 @@ data Game = Game {
   _gameWordReq :: Maybe WordReq,
   _gameBegins :: UTCTime,
   _gameEnded :: Bool,
-  _gamePlayers :: [Uid User] }
+  _gamePlayers :: Set (Uid User) }
   deriving (Show)
 
 deriveSafeCopySimple 0 'base ''Game
@@ -170,7 +174,7 @@ sampleState = GlobalState {
               _wordReqWordsPerUser = 10 },
           _gameBegins = read "2016-06-03 12:20:06 UTC",
           _gameEnded = False,
-          _gamePlayers = [] },
+          _gamePlayers = S.fromList ["user-cooler-100"] },
       Game {
           _gameUid = "game-boring-200",
           _gameTitle = "Boring game",
@@ -178,7 +182,7 @@ sampleState = GlobalState {
           _gameWordReq = Nothing,
           _gameBegins = read "2016-05-25 12:20:06 UTC",
           _gameEnded = True,
-          _gamePlayers = ["user-cooler-100"] } ],
+          _gamePlayers = mempty } ],
   _dirty = True }
   where
     salt = Salt "*xxxPxxxxxx)xHL#nx~z2xPxxxxvxxx#"
