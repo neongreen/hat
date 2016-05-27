@@ -140,9 +140,7 @@ main = do
                 JS.tryLogin (JS.selectUid errorId, formNode)
           form_ [onFormSubmit formSubmitHandler] $ do
             input_ [type_ "text", name_ "nick", placeholder_ "Username"]
-            br_ []
-            input_ [type_ "text", name_ "pass", placeholder_ "Password"]
-            br_ []
+            input_ [type_ "password", name_ "pass", placeholder_ "Password"]
             input_ [type_ "submit", value_ "Log in"]
           div_ [uid_ errorId, style_ "display:none"] ""
       Spock.post "login" $ do
@@ -184,6 +182,8 @@ wrapPage sess gs pageTitle page = doctypehtml_ $ do
     -- See Note [autosize]
     includeJS "/autosize-3.0.15.min.js"
     onPageLoad (JS "autosize($('textarea'));")
+    includeCSS "/normalize.css"
+    includeCSS "/milligram.min.css"
     includeCSS "/css.css"
     includeCSS "/loader.css"
     -- Include definitions of all Javascript functions that we have defined
