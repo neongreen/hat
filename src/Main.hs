@@ -165,10 +165,13 @@ main = do
           if not currentAdmin then
             p_ "You're not an admin."
           else do
-            h3_ "List of users"
-            ul_ $ for_ (s^.users) $ \user -> li_ $ do
-              mkLink (toHtml (user^.name))
-                     ("/user/" <> user^.nick)
+            let (admins, ordinaryUsers) = partition (view admin) (s^.users)
+            let userLink user = mkLink (toHtml (user^.name))
+                                       ("/user/" <> user^.nick)
+            h3_ "Admins"
+            p_ $ sequence_ $ intersperse ", " $ map userLink admins
+            h3_ "Users"
+            p_ $ sequence_ $ intersperse ", " $ map userLink ordinaryUsers
       Spock.get "login" $ do
         s <- dbQuery GetGlobalState
         sess <- readSession
