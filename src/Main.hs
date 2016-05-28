@@ -159,12 +159,16 @@ main = do
       Spock.get "admin" $ do
         s <- dbQuery GetGlobalState
         sess <- readSession
+        currentAdmin <- isAdmin
         lucidIO $ wrapPage sess s "Admin | Hat" $ do
           h2_ "Admin stuff"
-          h3_ "List of users"
-          ul_ $ for_ (s^.users) $ \user -> li_ $ do
-            mkLink (toHtml (user^.name))
-                   ("/user/" <> user^.nick)
+          if not currentAdmin then
+            p_ "You're not an admin."
+          else do
+            h3_ "List of users"
+            ul_ $ for_ (s^.users) $ \user -> li_ $ do
+              mkLink (toHtml (user^.name))
+                     ("/user/" <> user^.nick)
       Spock.get "login" $ do
         s <- dbQuery GetGlobalState
         sess <- readSession
@@ -265,7 +269,7 @@ main = do
 
 wrapPage
   :: (MonadIO m, MonadRandom m)
-  => Maybe (Uid User)
+  => Session
   -> GlobalState
   -> Text                              -- ^ Page title
   -> HtmlT m ()
@@ -303,20 +307,23 @@ wrapPage sess gs pageTitle page = doctypehtml_ $ do
     div_ [id_ "header"] $ do
       a_ [class_ "logo", href_ "/"]
         "Hat"
-      case sess of
-        Nothing -> do
-          a_ [class_ "float-right header-nav", href_ "/signup"]
-            "Sign up"
-          a_ [class_ "float-right header-nav", href_ "/login"]
-            "Log in"
-        Just u -> do
-          let user = gs ^. userById u
-          a_ [class_ "float-right header-nav", href_ "#",
-              onclick_ (fromJS (JS.logout ()) <> "return false;")]
-            "Log out"
-          a_ [class_ "float-right header-nav",
-              href_ ("/user/" <> user^.nick)]
-            (toHtml (user^.name))
+      span_ [class_ "float-right"] $ do
+        case sess of
+          Nothing -> do
+            a_ [class_ "header-nav", href_ "/signup"]
+              "Sign up"
+            a_ [class_ "header-nav", href_ "/login"]
+              "Log in"
+          Just u -> do
+            let user = gs ^. userById u
+            when (user^.admin) $
+              a_ [class_ "header-nav", href_ "/admin"]
+                "Admin stuff"
+            a_ [class_ "header-nav", href_ ("/user/" <> user^.nick)]
+              (toHtml (user^.name))
+            a_ [class_ "header-nav", href_ "#",
+                onclick_ (fromJS (JS.logout ()) <> "return false;")]
+              "Log out"
     div_ [id_ "main"] $ do
       page
     div_ [id_ "footer"] $ do
@@ -331,7 +338,7 @@ wrapPage sess gs pageTitle page = doctypehtml_ $ do
 
 gamePage
   :: Uid Game
-  -> ActionCtxT ctx (WebStateM () (Maybe (Uid User)) ServerState) ()
+  -> SpockActionCtx ctx conn Session ServerState ()
 gamePage gameId = do
   s <- dbQuery GetGlobalState
   sess <- readSession
@@ -386,6 +393,13 @@ gamePage gameId = do
           return ()  -- game has ended, nobody asked for words
         (_, Just req, False) -> wordsNeeded req
         (_, Just req, True) -> wordsWereNeeded req
+
+isAdmin :: SpockActionCtx ctx conn Session ServerState Bool
+isAdmin = do
+  sess <- readSession
+  case sess of
+    Nothing -> return False
+    Just u  -> view admin <$> dbQuery (GetUser u)
 
 emptySpan :: Monad m => Text -> HtmlT m ()
 emptySpan w = span_ [style_ ("margin-left:" <> w)] mempty
