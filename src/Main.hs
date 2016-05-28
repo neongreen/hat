@@ -154,8 +154,18 @@ main = do
         s <- dbQuery GetGlobalState
         sess <- readSession
         user <- dbQuery (GetUserByNick nick')
+        currentAdmin <- isAdmin
         lucidIO $ wrapPage sess s ((user^.name) <> " | Hat") $ do
           h2_ $ toHtml $ user^.name <> " (aka " <> user^.nick <> ")"
+          when (currentAdmin && not (user^.admin)) $
+            button_ [onClick (JS.makeAdmin [nick'])] "Make admin"
+          when (user^.admin) $
+            p_ "One of the admins."
+      Spock.post ("user" <//> var <//> "make-admin") $ \nick' -> do
+        currentAdmin <- isAdmin
+        when currentAdmin $ do
+          user <- dbQuery (GetUserByNick nick')
+          dbUpdate (SetAdmin (user^.uid) True)
       Spock.get "admin" $ do
         s <- dbQuery GetGlobalState
         sess <- readSession
@@ -412,6 +422,9 @@ onFormSubmit f = onsubmit_ $ format "{} return false;" [f (JS "this")]
 
 onPageLoad :: Monad m => JS -> HtmlT m ()
 onPageLoad js = script_ $ format "$(document).ready(function(){{}});" [js]
+
+onClick :: JS -> Attribute
+onClick (JS js) = onclick_ js
 
 mkLink :: Monad m => HtmlT m a -> Url -> HtmlT m a
 mkLink x src = a_ [href_ src] x

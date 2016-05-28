@@ -46,7 +46,8 @@ allJSFunctions = JS . T.unlines . map fromJS $ [
   tryLogin,
   logout,
   -- Other
-  submitWords ]
+  submitWords,
+  makeAdmin ]
 
 -- | A class for things that can be converted to Javascript syntax.
 class ToJS a where toJS :: a -> JS
@@ -295,6 +296,16 @@ submitWords =
         else {
           $(errorNode).text(data[1]);
           $(errorNode).show(); }
+     });
+  |]
+
+makeAdmin :: JSFunction a => a
+makeAdmin =
+  makeJSFunction "makeAdmin" ["nick"]
+  [text|
+    $.post("/user/" + nick + "/make-admin")
+     .done(function () {
+        location.reload();
      });
   |]
 

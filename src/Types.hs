@@ -55,6 +55,7 @@ module Types
   AddUser(..),
   GetUser(..),
   GetUserByNick(..), GetUserByNick'(..),
+  SetAdmin(..),
   GetGame(..),
   SetWords(..),
   SetDirty(..),
@@ -240,6 +241,9 @@ getUserByNick nick' = view (userByNick nick')
 getUserByNick' :: Text -> Acid.Query GlobalState (Maybe User)
 getUserByNick' nick' = preview (userByNick' nick')
 
+setAdmin :: Uid User -> Bool -> Acid.Update GlobalState ()
+setAdmin userId adm = userById userId . admin .= adm
+
 getGame :: Uid Game -> Acid.Query GlobalState Game
 getGame uid' = view (gameById uid')
 
@@ -259,6 +263,7 @@ makeAcidic ''GlobalState [
   'addUser,
   'getUser,
   'getUserByNick, 'getUserByNick',
+  'setAdmin,
   'getGame,
   'setWords,
   'setDirty, 'unsetDirty
