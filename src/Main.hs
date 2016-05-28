@@ -387,15 +387,28 @@ gamePage gameId = do
   sess <- readSession
   game <- dbQuery (GetGame gameId)
   creator <- dbQuery (GetUser (game^.createdBy))
+  players' <- mapM (dbQuery . GetUser) $ S.toList (game^.players)
   lucidIO $ wrapPage sess s (game^.title <> " | Hat") $ do
     h2_ (toHtml (game^.title))
     when (game^.ended) $ do
       p_ $ strong_ "This game has already ended."
     ul_ $ do
-      li_ $ do "game begins at "
+      li_ $ do "Game begins at "
                toHtml (show (game^.begins))
-      li_ $ do "created by "
+      li_ $ do "Created by "
                userLink creator
+      li_ $ do "Registered players: "
+               if null players'
+                 then "none"
+                 else sequence_ $ intersperse ", " (map userLink players')
+      let mbUw = game^?wordReq._Just.userWords
+      case mbUw of
+        Nothing -> return ()
+        Just uw -> li_ $ do
+          "Players who haven't submitted words: "
+          case filter (\p -> (p^.uid) `M.notMember` uw) players' of
+            [] -> "none"
+            xs -> sequence_ $ intersperse ", " (map userLink xs)
 
     for_ sess $ \u -> do
       -- the game is on, the user has to propose words
