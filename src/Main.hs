@@ -1,5 +1,6 @@
 {-# LANGUAGE
 OverloadedStrings,
+DataKinds,
 QuasiQuotes,
 TypeFamilies,
 TupleSections,
@@ -87,6 +88,9 @@ createCheckpoint' db = liftIO $ do
     createArchive db
     createCheckpoint db
 
+gameVar :: Path '[Uid Game]
+gameVar = "game" <//> var
+
 main :: IO ()
 main = do
   hSetBuffering stdout NoBuffering
@@ -121,34 +125,66 @@ main = do
           ul_ $ for_ (s ^. games) $ \game ->
             li_ $ mkLink (toHtml (game^.title))
                          ("/game/" <> uidToText (game^.uid))
-      Spock.post ("game" <//> var <//> "words" <//> "submit") $ \gameId -> do
+      Spock.post (gameVar <//> "players" <//> "add-self") $ \gameId -> do
+        sess <- readSession
+        game <- dbQuery (GetGame gameId)
+        now <- liftIO getCurrentTime
+        u <- case sess of
+          Nothing -> jsonFail "You're not logged in"
+          Just u  -> return u
+        when (u `S.member` (game^.players)) $
+          jsonFail "You're already registered for this game"
+        when (now > game^.begins) $
+          jsonFail "This game has already begun"
+        dbUpdate (AddPlayer gameId u)
+        jsonSuccess
+      Spock.post (gameVar <//> "players" <//> "remove-self") $ \gameId -> do
+        sess <- readSession
+        game <- dbQuery (GetGame gameId)
+        now <- liftIO getCurrentTime
+        u <- case sess of
+          Nothing -> jsonFail "You're not logged in"
+          Just u  -> return u
+        when (u `S.notMember` (game^.players)) $
+          jsonFail "You aren't registered for this game"
+        when (now > game^.begins) $
+          jsonFail "The game has already begun, you can't unregister now"
+        dbUpdate (RemovePlayer gameId u)
+        jsonSuccess
+      Spock.post (gameVar <//> "words" <//> "submit") $ \gameId -> do
         sess <- readSession
         game <- dbQuery (GetGame gameId)
         ws <- T.words <$> param' "words"
         u <- case sess of
           Just u  -> return u
-          Nothing -> jsonFail "You're not logged in"
+          Nothing -> jsonFormFail "words" "You're not logged in"
         req <- case game^.wordReq of
           Just req -> return req
-          Nothing  -> jsonFail "Words aren't required for this game"
+          Nothing  -> jsonFormFail "words"
+            "Words aren't required for this game"
         when (u `S.notMember` (game^.players)) $
-          jsonFail "You aren't participating in this game"
+          jsonFormFail "words" "You aren't participating in this game"
         when (isJust (req^.userWords.at u)) $
-          jsonFail "You have already submitted words"
+          jsonFormFail "words" "You have already submitted words"
         when (length (ordNub ws) < length ws) $
-          jsonFail "Your list of words contains duplicates"
+          jsonFormFail "words" "The list contains duplicates"
         when (any (T.any (== ',')) ws) $
-          jsonFail "Punctuation isn't allowed"
+          jsonFormFail "words" "Punctuation isn't allowed"
+        when (null ws) $
+          jsonFormFail "words" "You haven't entered any words"
         when (length ws < req^.wordsPerUser) $
-          jsonFail $ format "You entered only {} word{}"
-            (length ws, if length ws == 1 then "" else "s" :: Text)
+          jsonFormFail "words" $
+            format "You entered {} word{} out of {}"
+              (length ws, if length ws == 1 then "" else "s" :: Text,
+               req^.wordsPerUser)
         when (length ws > req^.wordsPerUser) $
-          jsonFail $ format "You entered {} words, that's too many"
-            [length ws]
+          jsonFormFail "words" $
+            format "You entered {} words, that's too many"
+              [length ws]
         -- All checks passed
         dbUpdate (SetWords gameId u ws)
         jsonSuccess
-      Spock.get ("game" <//> var) $ \gameId ->
+      Spock.get (gameVar) $ \gameId ->
         gamePage gameId
       Spock.get ("user" <//> var) $ \nick' -> do
         s <- dbQuery GetGlobalState
@@ -158,7 +194,8 @@ main = do
         lucidIO $ wrapPage sess s ((user^.name) <> " | Hat") $ do
           h2_ $ toHtml $ user^.name <> " (aka " <> user^.nick <> ")"
           when (currentAdmin && not (user^.admin)) $
-            button_ [onClick (JS.makeAdmin [nick'])] "Make admin"
+            button "Make admin" $
+              JS.makeAdmin [nick']
           when (user^.admin) $
             p_ "One of the admins."
       Spock.post ("user" <//> var <//> "make-admin") $ \nick' -> do
@@ -176,8 +213,6 @@ main = do
             p_ "You're not an admin."
           else do
             let (admins, ordinaryUsers) = partition (view admin) (s^.users)
-            let userLink user = mkLink (toHtml (user^.name))
-                                       ("/user/" <> user^.nick)
             h3_ "Admins"
             p_ $ sequence_ $ intersperse ", " $ map userLink admins
             h3_ "Users"
@@ -186,22 +221,24 @@ main = do
         s <- dbQuery GetGlobalState
         sess <- readSession
         lucidIO $ wrapPage sess s "Log in | Hat" $ do
-          errorId <- randomLongUid
           let formSubmitHandler formNode =
-                JS.tryLogin (JS.selectUid errorId, formNode)
+                JS.tryLogin [formNode]
           form_ [onFormSubmit formSubmitHandler] $ do
-            input_ [type_ "text", name_ "nick", placeholder_ "Username"]
-            input_ [type_ "password", name_ "pass", placeholder_ "Password"]
+            label_ [Lucid.for_ "nick"]
+              "Username"
+            input_ [type_ "text", name_ "nick"]
+            label_ [Lucid.for_ "pass"]
+              "Password"
+            input_ [type_ "password", name_ "pass"]
             input_ [type_ "submit", value_ "Log in"]
-          div_ [uid_ errorId, style_ "display:none"] ""
       Spock.post "login" $ do
         nick' <- param' "nick"
         pass' <- Pass . T.encodeUtf8 <$> param' "pass"
         mbUser <- dbQuery (GetUserByNick' nick')
         case mbUser of
-          Nothing   -> jsonFail "User not found"
+          Nothing   -> jsonFormFail "nick" "User not found"
           Just user -> case verifyPass' pass' (user^.pass) of
-            False -> jsonFail "Incorrect password"
+            False -> jsonFormFail "pass" "Incorrect password"
             True  -> do writeSession (Just (user^.uid))
                         jsonSuccess
       Spock.get "signup" $ do
@@ -214,29 +251,23 @@ main = do
               let formSubmitHandler formNode =
                     JS.trySignup [formNode]
               form_ [onFormSubmit formSubmitHandler] $ do
-                let errorSpan = span_ [class_ "float-right label-err"] ""
                 fieldset_ $ do
-                  label_ [Lucid.for_ "name"] $ do
+                  label_ [Lucid.for_ "name"]
                     "Name"
-                    errorSpan
                   input_ [type_ "text", name_ "name"]
-                  label_ [Lucid.for_ "nick"] $ do
+                  label_ [Lucid.for_ "nick"]
                     "Nickname (letters, digits, _-.)"
-                    errorSpan
                   input_ [type_ "text", name_ "nick"]
                 fieldset_ $ do
-                  label_ [Lucid.for_ "pass"] $ do
+                  label_ [Lucid.for_ "pass"]
                     "Password"
-                    errorSpan
                   input_ [type_ "password", name_ "pass"]
-                  label_ [Lucid.for_ "pass2"] $ do
+                  label_ [Lucid.for_ "pass2"]
                     "Password again"
-                    errorSpan
                   input_ [type_ "password", name_ "pass2"]
                 fieldset_ $ do
-                  label_ [Lucid.for_ "email"] $ do
+                  label_ [Lucid.for_ "email"]
                     "Email (just in case)"
-                    errorSpan
                   input_ [type_ "email", name_ "email"]
                 input_ [type_ "submit", value_ "Sign up"]
                 a_ [class_ "button button-clear",
@@ -250,26 +281,25 @@ main = do
         pass2' <- param' "pass2"
         email' <- param' "email"
         -- Validating the form
-        let jsonFail2 f err = json (False, f::Text, err::Text)
         -- name
         when (T.null name') $
-          jsonFail2 "name" "Can't be empty"
+          jsonFormFail "name" "Can't be empty"
         -- nick
         when (T.null nick') $
-          jsonFail2 "nick" "Can't be empty"
+          jsonFormFail "nick" "Can't be empty"
         mbUser <- dbQuery (GetUserByNick' nick')
         when (isJust mbUser) $
-          jsonFail2 "nick" "This nickname is taken"
+          jsonFormFail "nick" "This nickname is taken"
         unless (T.all (\c -> isAlphaNum c || c `elem` ['.','-','_']) nick') $
-          jsonFail2 "nick" "Contains forbidden characters"
+          jsonFormFail "nick" "Contains forbidden characters"
         -- passwords
         when (T.null pass') $
-          jsonFail2 "pass" "Can't be empty"
+          jsonFormFail "pass" "Can't be empty"
         when (pass' /= pass2') $
-          jsonFail2 "pass" "Passwords don't match"
+          jsonFormFail "pass" "Passwords don't match"
         -- email
         when (T.null email') $
-          jsonFail2 "email" "Can't be empty"
+          jsonFormFail "email" "Can't be empty"
         -- Success
         uid' <- randomShortUid
         encPass <- liftIO $ encryptPassIO' (Pass (T.encodeUtf8 pass'))
@@ -357,16 +387,15 @@ gamePage gameId = do
   sess <- readSession
   game <- dbQuery (GetGame gameId)
   creator <- dbQuery (GetUser (game^.createdBy))
-  lucidIO $ wrapPage sess s ((game^.title) <> " | Hat") $ do
+  lucidIO $ wrapPage sess s (game^.title <> " | Hat") $ do
     h2_ (toHtml (game^.title))
     when (game^.ended) $ do
-      p_ $ strong_ "This game already ended."
+      p_ $ strong_ "This game has already ended."
     ul_ $ do
       li_ $ do "game begins at "
                toHtml (show (game^.begins))
       li_ $ do "created by "
-               mkLink (toHtml (creator^.name))
-                      ("/user/" <> creator^.nick)
+               userLink creator
 
     for_ sess $ \u -> do
       -- the game is on, the user has to propose words
@@ -375,18 +404,14 @@ gamePage gameId = do
               p_ "Your proposed words for the game are:"
               blockquote_ (toHtml (T.unwords (S.toList ws)))
             Nothing -> do
-              p_ $ do
-                "Propose " >> strong_ (toHtml (show (req^.wordsPerUser)))
-                " words for this game. Once you submit them, you won't"
-                " be able to edit them, so choose carefully."
-              errorId <- randomLongUid
               let formSubmitHandler formNode =
-                    JS.submitWords (JS.selectUid errorId, gameId, formNode)
+                    JS.submitWords (gameId, formNode)
               form_ [onFormSubmit formSubmitHandler] $ do
-                let plh = "Separate words with spaces"
+                label_ [Lucid.for_ "words"]
+                  "Your proposed words for this game"
+                let plh = format "{} space-separated words" [req^.wordsPerUser]
                 textarea_ [name_ "words", placeholder_ plh] ""
                 input_ [type_ "submit", value_ "Submit"]
-              div_ [uid_ errorId, style_ "display:none"] ""
       -- the game has ended, the user had to propose words
       let wordsWereNeeded req = case req^.userWords.at u of
             Nothing ->
@@ -396,15 +421,29 @@ gamePage gameId = do
               for_ ws $ \w -> li_ (toHtml w)
 
       case (S.member u (game^.players), game^.wordReq, game^.ended) of
-        (False, _, False) ->
-          p_ "You aren't participating in this game yet."
+        (False, _, False) -> do
+          errorId <- randomLongUid
+          button "Register" $
+            JS.addPlayerSelf (JS.selectUid errorId, game^.uid)
+          div_ [uid_ errorId, style_ "display:none"] ""
         (False, _, True) ->
           p_ "You didn't participate in this game."
-        (_, Nothing, False) ->
+        (_, Nothing, False) -> do
+          errorId <- randomLongUid
+          button "Unregister" $
+            JS.removePlayerSelf (JS.selectUid errorId, game^.uid)
+          div_ [uid_ errorId, style_ "display:none"] ""
+          p_ ""
           p_ "You don't have to propose words for this game."
         (_, Nothing, True) ->
           return ()  -- game has ended, nobody asked for words
-        (_, Just req, False) -> wordsNeeded req
+        (_, Just req, False) -> do
+          errorId <- randomLongUid
+          button "Unregister" $
+            JS.removePlayerSelf (JS.selectUid errorId, game^.uid)
+          div_ [uid_ errorId, style_ "display:none"] ""
+          p_ ""
+          wordsNeeded req
         (_, Just req, True) -> wordsWereNeeded req
 
 isAdmin :: SpockActionCtx ctx conn Session ServerState Bool
@@ -413,6 +452,13 @@ isAdmin = do
   case sess of
     Nothing -> return False
     Just u  -> view admin <$> dbQuery (GetUser u)
+
+userLink :: Monad m => User -> HtmlT m ()
+userLink user = mkLink (toHtml (user^.name))
+                       ("/user/" <> user^.nick)
+
+button :: Monad m => Text -> JS -> HtmlT m ()
+button caption js = button_ [onClick js] (toHtml caption)
 
 emptySpan :: Monad m => Text -> HtmlT m ()
 emptySpan w = span_ [style_ ("margin-left:" <> w)] mempty
@@ -431,6 +477,9 @@ mkLink x src = a_ [href_ src] x
 
 jsonFail :: MonadIO m => Text -> ActionCtxT ctx m a
 jsonFail x = json (False, x)
+
+jsonFormFail :: MonadIO m => Text -> Text -> ActionCtxT ctx m a
+jsonFormFail field err = json (False, field, err)
 
 jsonSuccess :: MonadIO m => ActionCtxT ctx m a
 jsonSuccess = json (True, "" :: Text)

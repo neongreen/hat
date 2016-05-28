@@ -41,12 +41,14 @@ allJSFunctions = JS . T.unlines . map fromJS $ [
   -- Misc
   createAjaxIndicator,
   autosizeTextarea,
+  showFormError,
   -- Signup/login
   trySignup,
   tryLogin,
   logout,
   -- Other
   submitWords,
+  addPlayerSelf, removePlayerSelf,
   makeAdmin ]
 
 -- | A class for things that can be converted to Javascript syntax.
@@ -243,6 +245,18 @@ autosizeTextarea =
     autosize.update(textareaNode);
   |]
 
+showFormError :: JSFunction a => a
+showFormError =
+  makeJSFunction "showFormError" ["form", "field", "err"]
+  [text|
+    $(form).find(".label-err").remove();
+    label = $(form).find("[name="+field+"]").prev();
+    errSpan = $("<span>", {
+      "class" : "float-right label-err",
+      "text"  : err })[0];
+    label.append(errSpan);
+  |]
+
 trySignup :: JSFunction a => a
 trySignup =
   makeJSFunction "trySignup" ["form"]
@@ -252,25 +266,22 @@ trySignup =
         if (data[0]) {
           window.location.href = "/"; }
         else {
-          $(form).find("label").find("span").text("");
-          $(form).find("[name="+data[1]+"]")
-                 .prev().find("span").text(data[2]);
+          showFormError(form, data[1], data[2]);
         }
      });
   |]
 
 tryLogin :: JSFunction a => a
 tryLogin =
-  makeJSFunction "tryLogin" ["errorNode", "form"]
+  makeJSFunction "tryLogin" ["form"]
   [text|
     $.post("/login", $(form).serialize())
      .done(function (data) {
         if (data[0]) {
-          $(errorNode).hide();
           window.location.href = "/"; }
         else {
-          $(errorNode).text(data[1]);
-          $(errorNode).show(); }
+          showFormError(form, data[1], data[2]);
+        }
      });
   |]
 
@@ -286,16 +297,14 @@ logout =
 
 submitWords :: JSFunction a => a
 submitWords =
-  makeJSFunction "submitWords" ["errorNode", "gameId", "form"]
+  makeJSFunction "submitWords" ["gameId", "form"]
   [text|
     $.post("/game/" + gameId + "/words/submit", $(form).serialize())
      .done(function (data) {
-        if (data[0]) {
-          $(errorNode).hide();
-          location.reload(); }
-        else {
-          $(errorNode).text(data[1]);
-          $(errorNode).show(); }
+        if (data[0])
+          location.reload();
+        else
+          showFormError(form, data[1], data[2]);
      });
   |]
 
@@ -306,6 +315,36 @@ makeAdmin =
     $.post("/user/" + nick + "/make-admin")
      .done(function () {
         location.reload();
+     });
+  |]
+
+addPlayerSelf :: JSFunction a => a
+addPlayerSelf =
+  makeJSFunction "addPlayerSelf" ["errorNode", "gameId"]
+  [text|
+    $.post("/game/" + gameId + "/players/add-self")
+     .done(function (data) {
+        if (data[0]) {
+          $(errorNode).hide();
+          location.reload(); }
+        else {
+          $(errorNode).text(data[1]);
+          $(errorNode).show(); }
+     });
+  |]
+
+removePlayerSelf :: JSFunction a => a
+removePlayerSelf =
+  makeJSFunction "removePlayerSelf" ["errorNode", "gameId"]
+  [text|
+    $.post("/game/" + gameId + "/players/remove-self")
+     .done(function (data) {
+        if (data[0]) {
+          $(errorNode).hide();
+          location.reload(); }
+        else {
+          $(errorNode).text(data[1]);
+          $(errorNode).show(); }
      });
   |]
 

@@ -53,13 +53,13 @@ module Types
   GetGlobalState(..),
   GetSessions(..), SetSessions(..),
   AddUser(..),
+  AddPlayer(..), RemovePlayer(..),
   GetUser(..),
   GetUserByNick(..), GetUserByNick'(..),
   SetAdmin(..),
   GetGame(..),
   SetWords(..),
-  SetDirty(..),
-  UnsetDirty(..),
+  SetDirty(..), UnsetDirty(..),
 )
 where
 
@@ -232,6 +232,14 @@ addUser uid' nick' name' pass' email' now = do
   users %= (user:)
   return user
 
+addPlayer :: Uid Game -> Uid User -> Acid.Update GlobalState ()
+addPlayer gameId userId = gameById gameId . players %= S.insert userId
+
+removePlayer :: Uid Game -> Uid User -> Acid.Update GlobalState ()
+removePlayer gameId userId = do
+  gameById gameId . players %= S.delete userId
+  gameById gameId . wordReq . _Just . userWords . at userId .= Nothing
+
 getUser :: Uid User -> Acid.Query GlobalState User
 getUser uid' = view (userById uid')
 
@@ -261,6 +269,7 @@ makeAcidic ''GlobalState [
   'getGlobalState,
   'getSessions, 'setSessions,
   'addUser,
+  'addPlayer, 'removePlayer,
   'getUser,
   'getUserByNick, 'getUserByNick',
   'setAdmin,
