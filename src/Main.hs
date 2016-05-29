@@ -26,8 +26,11 @@ import Data.Text (Text)
 import NeatInterpolation
 -- Lists
 import Data.List.Index
+import Data.List.Split (chunksOf)
 -- Vector
 import qualified Data.Vector.Unboxed as U
+-- Randomness
+import System.Random.Shuffle
 -- Containers
 import qualified Data.Set as S
 import qualified Data.Map as M
@@ -152,6 +155,31 @@ main = do
           jsonFail "The game has already begun, you can't unregister now"
         dbUpdate (RemovePlayer gameId u)
         jsonSuccess
+      Spock.get (gameVar <//> "words" <//> "printable") $ \gameId -> do
+        game <- dbQuery (GetGame gameId)
+        currentAdmin <- isAdmin
+        lucidIO $ do
+          if not currentAdmin
+            then p_ "Only admins can see the words"
+            else case game^.wordReq of
+              Nothing -> p_ "In this game players don't submit words"
+              Just req -> do
+                ws <- chunksOf 3 <$>
+                  shuffleM (concatMap S.toList (req^..userWords.each))
+                table_ $ for_ ws $ \wg -> tr_ $ do
+                  for_ wg $ \w -> td_ (toHtml w)
+                style_ [text|
+                  table {
+                    border-collapse: collapse;
+                    border-spacing: 0; }
+                  td {
+                      text-align: center;
+                      width: 5.5cm;
+                      height: 1cm;
+                      max-height: 1cm;
+                      border: 1pt dotted #eee;
+                      padding: 0.2cm 0.5cm; }
+                  |]
       Spock.post (gameVar <//> "words" <//> "submit") $ \gameId -> do
         sess <- readSession
         game <- dbQuery (GetGame gameId)
@@ -389,6 +417,7 @@ gamePage gameId = do
   game <- dbQuery (GetGame gameId)
   creator <- dbQuery (GetUser (game^.createdBy))
   players' <- mapM (dbQuery . GetUser) $ S.toList (game^.players)
+  currentAdmin <- isAdmin
   lucidIO $ wrapPage sess s (game^.title <> " | Hat") $ do
     h2_ (toHtml (game^.title))
     when (game^.ended) $ do
@@ -459,6 +488,11 @@ gamePage gameId = do
           p_ ""
           wordsNeeded req
         (_, Just req, True) -> wordsWereNeeded req
+
+    when (currentAdmin && isJust (game^.wordReq)) $
+      a_ [class_ "button",
+          href_ (format "/game/{}/words/printable" [game^.uid])]
+        "Show submitted words"
 
 isAdmin :: SpockActionCtx ctx conn Session ServerState Bool
 isAdmin = do

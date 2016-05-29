@@ -40,6 +40,8 @@ executable hat
                      , hashable
                      , ilist
                      , lucid >= 2.9.5 && < 3
+                     , split
+                     , random-shuffle
                      , microlens-platform
                      , mtl
                      , neat-interpolation
