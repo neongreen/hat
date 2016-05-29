@@ -104,6 +104,7 @@ main = do
     let spockConfig = (defaultSpockCfg Nothing PCNoDatabase serverState) {
           spc_sessionCfg = (defaultSessionCfg Nothing) {
             sc_housekeepingInterval = 10, -- seconds
+            sc_sessionTTL = 86400*30,     -- month
             sc_persistCfg = Just SessionPersistCfg {
               spc_load = Acid.query db GetSessions,
               -- this will be called every housekeeping_Interval
