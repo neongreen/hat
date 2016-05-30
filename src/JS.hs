@@ -49,6 +49,7 @@ allJSFunctions = JS . T.unlines . map fromJS $ [
   -- Other
   submitWords,
   addPlayerSelf, removePlayerSelf,
+  beginGame,
   makeAdmin ]
 
 -- | A class for things that can be converted to Javascript syntax.
@@ -345,6 +346,16 @@ removePlayerSelf =
         else {
           $(errorNode).text(data[1]);
           $(errorNode).show(); }
+     });
+  |]
+
+beginGame :: JSFunction a => a
+beginGame =
+  makeJSFunction "beginGame" ["gameId"]
+  [text|
+    $.post("/game/" + gameId + "/begin")
+     .done(function () {
+        location.reload();
      });
   |]
 

@@ -129,123 +129,24 @@ main = do
           ul_ $ for_ (s ^. games) $ \game ->
             li_ $ mkLink (toHtml (game^.title))
                          ("/game/" <> uidToText (game^.uid))
-      Spock.post (gameVar <//> "players" <//> "add-self") $ \gameId -> do
-        sess <- readSession
-        game <- dbQuery (GetGame gameId)
-        now <- liftIO getCurrentTime
-        u <- case sess of
-          Nothing -> jsonFail "You're not logged in"
-          Just u  -> return u
-        when (u `S.member` (game^.players)) $
-          jsonFail "You're already registered for this game"
-        when (now > game^.begins) $
-          jsonFail "This game has already begun"
-        dbUpdate (AddPlayer gameId u)
-        jsonSuccess
-      Spock.post (gameVar <//> "players" <//> "remove-self") $ \gameId -> do
-        sess <- readSession
-        game <- dbQuery (GetGame gameId)
-        now <- liftIO getCurrentTime
-        u <- case sess of
-          Nothing -> jsonFail "You're not logged in"
-          Just u  -> return u
-        when (u `S.notMember` (game^.players)) $
-          jsonFail "You aren't registered for this game"
-        when (now > game^.begins) $
-          jsonFail "The game has already begun, you can't unregister now"
-        dbUpdate (RemovePlayer gameId u)
-        jsonSuccess
-      Spock.get (gameVar <//> "words" <//> "printable") $ \gameId -> do
-        game <- dbQuery (GetGame gameId)
-        currentAdmin <- isAdmin
-        lucidIO $ do
-          if not currentAdmin
-            then p_ "Only admins can see the words"
-            else case game^.wordReq of
-              Nothing -> p_ "In this game players don't submit words"
-              Just req -> do
-                ws <- chunksOf 3 <$>
-                  shuffleM (concatMap S.toList (req^..userWords.each))
-                table_ $ for_ ws $ \wg -> tr_ $ do
-                  for_ wg $ \w -> td_ (toHtml w)
-                style_ [text|
-                  table {
-                    border-collapse: collapse;
-                    border-spacing: 0; }
-                  td {
-                      text-align: center;
-                      width: 5.5cm;
-                      height: 1cm;
-                      max-height: 1cm;
-                      border: 1pt dotted #eee;
-                      padding: 0.2cm 0.5cm; }
-                  |]
-      Spock.post (gameVar <//> "words" <//> "submit") $ \gameId -> do
-        sess <- readSession
-        game <- dbQuery (GetGame gameId)
-        ws <- T.words <$> param' "words"
-        u <- case sess of
-          Just u  -> return u
-          Nothing -> jsonFormFail "words" "You're not logged in"
-        req <- case game^.wordReq of
-          Just req -> return req
-          Nothing  -> jsonFormFail "words"
-            "Words aren't required for this game"
-        when (u `S.notMember` (game^.players)) $
-          jsonFormFail "words" "You aren't participating in this game"
-        when (isJust (req^.userWords.at u)) $
-          jsonFormFail "words" "You have already submitted words"
-        when (length (ordNub ws) < length ws) $
-          jsonFormFail "words" "The list contains duplicates"
-        when (any (T.any (== ',')) ws) $
-          jsonFormFail "words" "Punctuation isn't allowed"
-        when (null ws) $
-          jsonFormFail "words" "You haven't entered any words"
-        when (length ws < req^.wordsPerUser) $
-          jsonFormFail "words" $
-            format "You entered {} word{} out of {}"
-              (length ws, if length ws == 1 then "" else "s" :: Text,
-               req^.wordsPerUser)
-        when (length ws > req^.wordsPerUser) $
-          jsonFormFail "words" $
-            format "You entered {} words, that's too many"
-              [length ws]
-        -- All checks passed
-        dbUpdate (SetWords gameId u ws)
-        jsonSuccess
-      Spock.get (gameVar) $ \gameId ->
-        gamePage gameId
-      Spock.get ("user" <//> var) $ \nick' -> do
-        s <- dbQuery GetGlobalState
-        sess <- readSession
-        user <- dbQuery (GetUserByNick nick')
-        currentAdmin <- isAdmin
-        lucidIO $ wrapPage sess s ((user^.name) <> " | Hat") $ do
-          h2_ $ toHtml $ user^.name <> " (aka " <> user^.nick <> ")"
-          when (currentAdmin && not (user^.admin)) $
-            button "Make admin" $
-              JS.makeAdmin [nick']
-          when (user^.admin) $
-            p_ "One of the admins."
-      Spock.post ("user" <//> var <//> "make-admin") $ \nick' -> do
-        currentAdmin <- isAdmin
-        when currentAdmin $ do
-          user <- dbQuery (GetUserByNick nick')
-          dbUpdate (SetAdmin (user^.uid) True)
+      gameMethods
+      userMethods
+
       Spock.get "admin" $ do
         s <- dbQuery GetGlobalState
         sess <- readSession
         currentAdmin <- isAdmin
         lucidIO $ wrapPage sess s "Admin | Hat" $ do
           h2_ "Admin stuff"
-          if not currentAdmin then
-            p_ "You're not an admin."
-          else do
-            let (admins, ordinaryUsers) = partition (view admin) (s^.users)
-            h3_ "Admins"
-            p_ $ sequence_ $ intersperse ", " $ map userLink admins
-            h3_ "Users"
-            p_ $ sequence_ $ intersperse ", " $ map userLink ordinaryUsers
+          if not currentAdmin
+            then p_ "You're not an admin."
+            else do
+              let (admins, ordinaryUsers) = partition (view admin) (s^.users)
+              h3_ "Admins"
+              p_ $ sequence_ $ intersperse ", " $ map userLink admins
+              h3_ "Users"
+              p_ $ sequence_ $ intersperse ", " $ map userLink ordinaryUsers
+
       Spock.get "login" $ do
         s <- dbQuery GetGlobalState
         sess <- readSession
@@ -260,6 +161,7 @@ main = do
               "Password"
             input_ [type_ "password", name_ "pass"]
             input_ [type_ "submit", value_ "Log in"]
+
       Spock.post "login" $ do
         nick' <- param' "nick"
         pass' <- Pass . T.encodeUtf8 <$> param' "pass"
@@ -270,6 +172,7 @@ main = do
             False -> jsonFormFail "pass" "Incorrect password"
             True  -> do writeSession (Just (user^.uid))
                         jsonSuccess
+
       Spock.get "signup" $ do
         s <- dbQuery GetGlobalState
         sess <- readSession
@@ -299,10 +202,10 @@ main = do
                     "Email (just in case)"
                   input_ [type_ "email", name_ "email"]
                 input_ [type_ "submit", value_ "Sign up"]
-                a_ [class_ "button button-clear",
-                    href_ "http://imgur.com/r/blep/hvk4r7x",
-                    target_ "_blank"]
-                  "Show me cats with stuck-out tongues instead"
+                buttonLink "Show me cats with stuck-out tongues instead"
+                  [class_ "button-clear", target_ "_blank"]
+                  "http://imgur.com/r/blep/hvk4r7x"
+
       Spock.post "signup" $ do
         nick'  <- param' "nick"
         name'  <- param' "name"
@@ -408,6 +311,116 @@ wrapPage sess gs pageTitle page = doctypehtml_ $ do
              mkLink "issue tracker" "https://github.com/neongreen/hat/issues"
         ]
 
+{-
+How preregistration works:
+
+  * during preregistration, anyone can register, unregister, etc
+  * when preregistration ends, people can still add words and unregister but can't register
+-}
+
+gameMethods :: SpockM ctx Session ServerState ()
+gameMethods = do
+  Spock.get (gameVar) $ \gameId ->
+    gamePage gameId
+
+  Spock.post (gameVar <//> "begin") $ \gameId -> do
+    currentAdmin <- isAdmin
+    game <- dbQuery (GetGame gameId)
+    when (not currentAdmin) $
+      jsonFail "You're not an admin"
+    when (game^.begun) $
+      jsonFail "The game has already begun"
+    dbUpdate (SetGameBegun gameId True)
+    jsonSuccess
+
+  Spock.post (gameVar <//> "players" <//> "add-self") $ \gameId -> do
+    sess <- readSession
+    game <- dbQuery (GetGame gameId)
+    now <- liftIO getCurrentTime
+    u <- case sess of
+      Nothing -> jsonFail "You're not logged in"
+      Just u  -> return u
+    when (u `S.member` (game^.players)) $
+      jsonFail "You're already registered for this game"
+    when (game^.begun) $
+      jsonFail "This game has already begun"
+    when (now > game^.registerUntil) $
+      jsonFail "The pre-registration period has ended"
+    dbUpdate (AddPlayer gameId u)
+    jsonSuccess
+
+  Spock.post (gameVar <//> "players" <//> "remove-self") $ \gameId -> do
+    sess <- readSession
+    game <- dbQuery (GetGame gameId)
+    u <- case sess of
+      Nothing -> jsonFail "You're not logged in"
+      Just u  -> return u
+    when (u `S.notMember` (game^.players)) $
+      jsonFail "You aren't registered for this game"
+    when (game^.begun) $
+      jsonFail "The game has already begun, you can't unregister now"
+    dbUpdate (RemovePlayer gameId u)
+    jsonSuccess
+
+  Spock.get (gameVar <//> "words" <//> "printable") $ \gameId -> do
+    game <- dbQuery (GetGame gameId)
+    currentAdmin <- isAdmin
+    lucidIO $ do
+      if not currentAdmin
+        then p_ "Only admins can see the words"
+        else case game^.wordReq of
+          Nothing -> p_ "In this game players don't submit words"
+          Just req -> do
+            ws <- chunksOf 3 <$>
+              shuffleM (concatMap S.toList (req^..userWords.each))
+            table_ $ for_ ws $ \wg -> tr_ $ do
+              for_ wg $ \w -> td_ (toHtml w)
+            style_ [text|
+              table {
+                border-collapse: collapse;
+                border-spacing: 0; }
+              td {
+                text-align: center;
+                width: 5.5cm;
+                height: 1cm;
+                border: 1pt dotted #eee;
+                padding: 0.2cm 0.5cm; }
+              |]
+
+  Spock.post (gameVar <//> "words" <//> "submit") $ \gameId -> do
+    sess <- readSession
+    game <- dbQuery (GetGame gameId)
+    ws <- T.words <$> param' "words"
+    u <- case sess of
+      Just u  -> return u
+      Nothing -> jsonFormFail "words" "You're not logged in"
+    req <- case game^.wordReq of
+      Just req -> return req
+      Nothing  -> jsonFormFail "words"
+        "Words aren't required for this game"
+    when (u `S.notMember` (game^.players)) $
+      jsonFormFail "words" "You aren't participating in this game"
+    when (isJust (req^.userWords.at u)) $
+      jsonFormFail "words" "You have already submitted words"
+    when (length (ordNub ws) < length ws) $
+      jsonFormFail "words" "The list contains duplicates"
+    when (any (T.any (== ',')) ws) $
+      jsonFormFail "words" "Punctuation isn't allowed"
+    when (null ws) $
+      jsonFormFail "words" "You haven't entered any words"
+    when (length ws < req^.wordsPerUser) $
+      jsonFormFail "words" $
+        format "You entered {} word{} out of {}"
+          (length ws, if length ws == 1 then "" else "s" :: Text,
+           req^.wordsPerUser)
+    when (length ws > req^.wordsPerUser) $
+      jsonFormFail "words" $
+        format "You entered {} words, that's too many"
+          [length ws]
+    -- All checks passed
+    dbUpdate (SetWords gameId u ws)
+    jsonSuccess
+
 gamePage
   :: Uid Game
   -> SpockActionCtx ctx conn Session ServerState ()
@@ -422,11 +435,13 @@ gamePage gameId = do
     h2_ (toHtml (game^.title))
     when (game^.ended) $ do
       p_ $ strong_ "This game has already ended."
+    now <- liftIO getCurrentTime
     ul_ $ do
-      li_ $ do "Game begins at "
-               toHtml (show (game^.begins))
       li_ $ do "Created by "
                userLink creator
+      when (now < game^.registerUntil && not (game^.begun)) $
+        li_ $ do "Pre-registration ends at "
+                 toHtml (show (game^.registerUntil))
       li_ $ do "Registered players: "
                if null players'
                  then "none"
@@ -489,10 +504,36 @@ gamePage gameId = do
           wordsNeeded req
         (_, Just req, True) -> wordsWereNeeded req
 
-    when (currentAdmin && isJust (game^.wordReq)) $
-      a_ [class_ "button",
-          href_ (format "/game/{}/words/printable" [game^.uid])]
-        "Show submitted words"
+    when currentAdmin $ do
+      h3_ "Admin things"
+      when (isJust (game^.wordReq)) $ do
+        buttonLink "Show submitted words" []
+          (format "/game/{}/words/printable" [game^.uid])
+        emptySpan "1rem"
+      when (not (game^.begun)) $
+        button "Begin the game" $
+          JS.beginGame [game^.uid]
+
+userMethods :: SpockM ctx Session ServerState ()
+userMethods = do
+  Spock.get ("user" <//> var) $ \nick' -> do
+    s <- dbQuery GetGlobalState
+    sess <- readSession
+    user <- dbQuery (GetUserByNick nick')
+    currentAdmin <- isAdmin
+    lucidIO $ wrapPage sess s ((user^.name) <> " | Hat") $ do
+      h2_ $ toHtml $ user^.name <> " (aka " <> user^.nick <> ")"
+      when (currentAdmin && not (user^.admin)) $
+        button "Make admin" $
+          JS.makeAdmin [nick']
+      when (user^.admin) $
+        p_ "One of the admins."
+
+  Spock.post ("user" <//> var <//> "make-admin") $ \nick' -> do
+    currentAdmin <- isAdmin
+    when currentAdmin $ do
+      user <- dbQuery (GetUserByNick nick')
+      dbUpdate (SetAdmin (user^.uid) True)
 
 isAdmin :: SpockActionCtx ctx conn Session ServerState Bool
 isAdmin = do
@@ -507,6 +548,10 @@ userLink user = mkLink (toHtml (user^.name))
 
 button :: Monad m => Text -> JS -> HtmlT m ()
 button caption js = button_ [onClick js] (toHtml caption)
+
+buttonLink :: Monad m => Text -> [Attribute] -> Url -> HtmlT m ()
+buttonLink caption attrs link =
+  a_ (href_ link : class_ " button " : attrs) (toHtml caption)
 
 emptySpan :: Monad m => Text -> HtmlT m ()
 emptySpan w = span_ [style_ ("margin-left:" <> w)] mempty

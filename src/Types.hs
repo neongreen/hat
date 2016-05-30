@@ -31,7 +31,8 @@ module Types
   Game(..),
     title,
     createdBy,
-    begins,
+    registerUntil,
+    begun,
     ended,
     players,
     wordReq,
@@ -58,6 +59,7 @@ module Types
   GetUserByNick(..), GetUserByNick'(..),
   SetAdmin(..),
   GetGame(..),
+  SetGameBegun(..),
   SetWords(..),
   SetDirty(..), UnsetDirty(..),
 )
@@ -120,7 +122,8 @@ data Game = Game {
   _gameTitle :: Text,
   _gameCreatedBy :: Uid User,
   _gameWordReq :: Maybe WordReq,
-  _gameBegins :: UTCTime,
+  _gameRegisterUntil :: UTCTime,
+  _gameBegun :: Bool,
   _gameEnded :: Bool,
   _gamePlayers :: Set (Uid User) }
   deriving (Show)
@@ -181,7 +184,8 @@ sampleState = GlobalState {
           _gameWordReq = Just $ WordReq {
               _wordReqUserWords = mempty,
               _wordReqWordsPerUser = 10 },
-          _gameBegins = read "2016-06-03 12:20:06 UTC",
+          _gameRegisterUntil = read "2016-06-03 12:20:06 UTC",
+          _gameBegun = False,
           _gameEnded = False,
           _gamePlayers = S.fromList ["user-cooler-100"] },
       Game {
@@ -189,7 +193,8 @@ sampleState = GlobalState {
           _gameTitle = "Boring game",
           _gameCreatedBy = "user-cooler-100",
           _gameWordReq = Nothing,
-          _gameBegins = read "2016-05-25 12:20:06 UTC",
+          _gameRegisterUntil = read "2016-05-25 12:20:06 UTC",
+          _gameBegun = True,
           _gameEnded = True,
           _gamePlayers = mempty } ],
   _sessions = [],
@@ -255,6 +260,9 @@ setAdmin userId adm = userById userId . admin .= adm
 getGame :: Uid Game -> Acid.Query GlobalState Game
 getGame uid' = view (gameById uid')
 
+setGameBegun :: Uid Game -> Bool -> Acid.Update GlobalState ()
+setGameBegun gameId val = gameById gameId . begun .= val
+
 setWords :: Uid Game -> Uid User -> [Text] -> Acid.Update GlobalState ()
 setWords gameId userId ws =
   gameById gameId.wordReq._Just.userWords.at userId .= Just (S.fromList ws)
@@ -274,6 +282,7 @@ makeAcidic ''GlobalState [
   'getUserByNick, 'getUserByNick',
   'setAdmin,
   'getGame,
+  'setGameBegun,
   'setWords,
   'setDirty, 'unsetDirty
   ]
