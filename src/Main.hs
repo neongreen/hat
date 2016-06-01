@@ -34,6 +34,7 @@ import System.Random.Shuffle
 -- Containers
 import qualified Data.Set as S
 import qualified Data.Map as M
+import Data.Map (Map)
 import qualified Data.IntMap as IM
 -- Web
 import Web.Spock hiding (head, get, text)
