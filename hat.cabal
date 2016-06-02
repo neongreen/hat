@@ -50,8 +50,7 @@ executable hat
                      , path-pieces
                      , safecopy
                      , scrypt
-                     , text
-                     , text-format
+                     , text-all == 0.2.*
                      , time
                      , transformers
                      , vector

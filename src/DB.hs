@@ -81,8 +81,8 @@ import Data.Map (Map)
 import qualified Data.Set as S
 import Data.Set (Set)
 -- Text
-import qualified Data.Text as T
-import Data.Text (Text)
+import qualified Data.Text.All as T
+import Data.Text.All (Text)
 -- Time
 import Data.Time
 -- Web
@@ -323,17 +323,28 @@ execCommand db str = case parse p "" str of
            return $ do
              ss <- Acid.query db GetSessions
              for_ ss $ \(_, t, s) -> do
-               printf " * %s: %s\n" (show t) (show s)
+               printf "  * %s: %s\n" (show t) (show s)
       , do command "user?"
            choice
-             [ do string "id:"
-                  u <- uidArg
+             [ do u <- (string "id:" >> uidArg) <?> "id:<uid>"
                   return $ do
                     user <- Acid.query db (GetUser u)
                     print user
-             , do u <- thingArg
+             , do u <- thingArg <?> "nick"
                   return $ do
                     user <- Acid.query db (GetUserByNick u)
                     print user
              ]
+      , do command "add" >> command "user"
+           nick'  <- thingArg <?> "nick"
+           name'  <- strArg <?> "name"
+           pass'  <- strArg <?> "password"
+           email' <- strArg <?> "email"
+           return $ do
+             uid' <- randomShortUid
+             now  <- getCurrentTime
+             encPass <- encryptPassIO' (Pass (T.encodeUtf8 pass'))
+             Acid.update db $
+               AddUser uid' nick' name' encPass email' now
+             printf "uid: %s\n" (T.unpack (uidToText uid'))
       ]

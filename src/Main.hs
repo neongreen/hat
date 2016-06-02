@@ -20,10 +20,8 @@ import Lens.Micro.Platform hiding ((&))
 import Control.Monad.IO.Class
 import Control.Monad.Random
 -- Text
-import qualified Data.Text as T
-import qualified Data.Text.IO as T
-import qualified Data.Text.Encoding as T
-import Data.Text (Text)
+import qualified Data.Text.All as T
+import Data.Text.All (Text)
 import NeatInterpolation
 -- Lists
 import Data.List.Index
@@ -57,7 +55,7 @@ import qualified SlaveThread as Slave
 
 
 -- Local
-import Types
+import DB
 import Utils
 import qualified JS
 import JS (JS(..), allJSFunctions)
@@ -436,12 +434,12 @@ gameMethods = do
       jsonFormFail "words" "You haven't entered any words"
     when (length ws < req^.wordsPerUser) $
       jsonFormFail "words" $
-        format "You entered {} word{} out of {}"
+        T.format "You entered {} word{} out of {}"
           (length ws, if length ws == 1 then "" else "s" :: Text,
            req^.wordsPerUser)
     when (length ws > req^.wordsPerUser) $
       jsonFormFail "words" $
-        format "You entered {} words, that's too many"
+        T.format "You entered {} words, that's too many"
           [length ws]
     -- All checks passed
     dbUpdate (SetWords gameId u ws)
@@ -494,7 +492,8 @@ gamePage gameId = do
               form_ [onFormSubmit formSubmitHandler] $ do
                 label_ [Lucid.for_ "words"]
                   "Your proposed words for this game"
-                let plh = format "{} space-separated words" [req^.wordsPerUser]
+                let plh = T.format "{} space-separated words"
+                            [req^.wordsPerUser]
                 textarea_ [name_ "words", placeholder_ plh] ""
                 input_ [type_ "submit", value_ "Submit"]
       -- the game has ended, the user had to propose words
@@ -535,7 +534,7 @@ gamePage gameId = do
       h3_ "Admin things"
       when (isJust (game^.wordReq)) $ do
         buttonLink "Show submitted words" []
-          (format "/game/{}/words/printable" [game^.uid])
+          (T.format "/game/{}/words/printable" [game^.uid])
         emptySpan "1rem"
       when (not (game^.begun)) $
         button "Begin the game" [] $
@@ -544,7 +543,7 @@ gamePage gameId = do
       when (game^.begun) $ do
         p_ $ do
           let pls = S.size (game^.players)
-          toHtml $ format "There are {} player{}. "
+          toHtml $ T.format "There are {} player{}. "
             (pls, if pls == 1 then "" else "s" :: Text)
           "How many groups do you want?"
         numId <- randomLongUid
@@ -556,7 +555,7 @@ gamePage gameId = do
           Nothing -> return ()
           Just gs -> ul_ $ do
             for_ gs $ \g -> li_ $ do
-              toHtml $ format "{} player{}: "
+              toHtml $ T.format "{} player{}: "
                 (length g, if length g == 1 then "" else "s"::Text)
               sequence_ $ intersperse ", " (map userLink g)
 
@@ -604,10 +603,10 @@ emptySpan :: Monad m => Text -> HtmlT m ()
 emptySpan w = span_ [style_ ("margin-left:" <> w)] mempty
 
 onFormSubmit :: (JS -> JS) -> Attribute
-onFormSubmit f = onsubmit_ $ format "{} return false;" [f (JS "this")]
+onFormSubmit f = onsubmit_ $ T.format "{} return false;" [f (JS "this")]
 
 onPageLoad :: Monad m => JS -> HtmlT m ()
-onPageLoad js = script_ $ format "$(document).ready(function(){{}});" [js]
+onPageLoad js = script_ $ T.format "$(document).ready(function(){{}});" [js]
 
 onClick :: JS -> Attribute
 onClick (JS js) = onclick_ js

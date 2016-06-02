@@ -15,10 +15,6 @@ NoImplicitPrelude
 
 module Utils
 (
-  -- * Text
-  format,
-  tshow,
-
   -- * Lists
   ordNub,
 
@@ -58,14 +54,8 @@ import Data.Hashable
 -- Containers
 import qualified Data.Set as S
 -- Text
-import Data.Text (Text)
-import qualified Data.Text as T
-import qualified Data.Text.Lazy as TL
--- Formatting
-import           Data.Text.Format hiding (format)
-import qualified Data.Text.Format        as Format
-import qualified Data.Text.Format.Params as Format
-import qualified Data.Text.Buildable     as Format
+import Data.Text.All (Text)
+import qualified Data.Text.All as T
 -- Web
 import Lucid
 import Web.Spock
@@ -75,15 +65,6 @@ import Data.SafeCopy
 -- Passwords
 import Crypto.Scrypt
 
-
--- | Format a string (a bit like 'Text.Printf.printf' but with different
--- syntax). The version in "Data.Text.Format" returns lazy text, but we
--- use strict text everywhere.
-format :: Format.Params ps => Format -> ps -> Text
-format f ps = TL.toStrict (Format.format f ps)
-
-tshow :: Show a => a -> Text
-tshow = T.pack . show
 
 ordNub :: Ord a => [a] -> [a]
 ordNub = go mempty
@@ -108,7 +89,7 @@ makeSlug =
 
 -- | Unique id, used for many things – categories, items, and anchor ids.
 newtype Uid a = Uid {uidToText :: Text}
-  deriving (Eq, Ord, Show, PathPiece, Format.Buildable, Hashable)
+  deriving (Eq, Ord, Show, PathPiece, T.Buildable, Hashable)
 
 deriveSafeCopySimple 0 'base ''Uid
 
