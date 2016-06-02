@@ -15,7 +15,7 @@ NoImplicitPrelude
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 
 
-module Types
+module DB
 (
   -- * Types
   Session,
@@ -36,11 +36,13 @@ module Types
     ended,
     players,
     wordReq,
+    groups,
   GlobalState(..),
     games,
     users,
     sessions,
     dirty,
+  DB,
 
   -- * Common lenses
   uid,
@@ -49,6 +51,7 @@ module Types
   -- * Stuff
   sampleState,
   userById,
+  execCommand,
 
   -- * Methods
   GetGlobalState(..),
@@ -60,6 +63,7 @@ module Types
   SetAdmin(..),
   GetGame(..),
   SetGameBegun(..),
+  SetGameGroups(..),
   SetWords(..),
   SetDirty(..), UnsetDirty(..),
 )
@@ -88,6 +92,10 @@ import Data.Acid as Acid
 import Data.SafeCopy
 -- Passwords
 import Crypto.Scrypt
+-- Parsing
+import Text.Megaparsec
+import Text.Megaparsec.Text
+import qualified Text.Megaparsec.Lexer as L
 
 -- Local
 import Utils
@@ -125,7 +133,8 @@ data Game = Game {
   _gameRegisterUntil :: UTCTime,
   _gameBegun :: Bool,
   _gameEnded :: Bool,
-  _gamePlayers :: Set (Uid User) }
+  _gamePlayers :: Set (Uid User),
+  _gameGroups :: Maybe [[Uid User]] }
   deriving (Show)
 
 deriveSafeCopySimple 0 'base ''Game
@@ -140,6 +149,8 @@ data GlobalState = GlobalState {
 
 deriveSafeCopySimple 0 'base ''GlobalState
 makeLenses ''GlobalState
+
+type DB = AcidState GlobalState
 
 hasUid :: HasUid a (Uid u) => Uid u -> a -> Bool
 hasUid u x = x^.uid == u
@@ -187,7 +198,8 @@ sampleState = GlobalState {
           _gameRegisterUntil = read "2016-06-03 12:20:06 UTC",
           _gameBegun = False,
           _gameEnded = False,
-          _gamePlayers = S.fromList ["user-cooler-100"] },
+          _gamePlayers = S.fromList ["user-cooler-100"],
+          _gameGroups = Nothing },
       Game {
           _gameUid = "game-boring-200",
           _gameTitle = "Boring game",
@@ -196,7 +208,8 @@ sampleState = GlobalState {
           _gameRegisterUntil = read "2016-05-25 12:20:06 UTC",
           _gameBegun = True,
           _gameEnded = True,
-          _gamePlayers = mempty } ],
+          _gamePlayers = mempty,
+          _gameGroups = Nothing } ],
   _sessions = [],
   _dirty = True }
   where
@@ -263,6 +276,9 @@ getGame uid' = view (gameById uid')
 setGameBegun :: Uid Game -> Bool -> Acid.Update GlobalState ()
 setGameBegun gameId val = gameById gameId . begun .= val
 
+setGameGroups :: Uid Game -> Maybe [[Uid User]] -> Acid.Update GlobalState ()
+setGameGroups gameId val = gameById gameId . groups .= val
+
 setWords :: Uid Game -> Uid User -> [Text] -> Acid.Update GlobalState ()
 setWords gameId userId ws =
   gameById gameId.wordReq._Just.userWords.at userId .= Just (S.fromList ws)
@@ -283,6 +299,41 @@ makeAcidic ''GlobalState [
   'setAdmin,
   'getGame,
   'setGameBegun,
+  'setGameGroups,
   'setWords,
   'setDirty, 'unsetDirty
   ]
+
+execCommand :: DB -> Text -> IO ()
+execCommand db str = case parse p "" str of
+  Left err -> putStr (parseErrorPretty err)
+  Right io -> io >> putStrLn ""
+  where
+    command = L.symbol space
+    arg = L.lexeme space
+    strArg = T.pack <$> arg (char '"' >> L.charLiteral `manyTill` (char '"'))
+    thingArg = T.pack <$> arg (some (satisfy (not . isSpace)))
+    uidArg = Uid <$> thingArg
+    p :: Parser (IO ())
+    p = choice
+      [ do command "exit"
+           return $
+             exitSuccess
+      , do command "sessions?"
+           return $ do
+             ss <- Acid.query db GetSessions
+             for_ ss $ \(_, t, s) -> do
+               printf " * %s: %s\n" (show t) (show s)
+      , do command "user?"
+           choice
+             [ do string "id:"
+                  u <- uidArg
+                  return $ do
+                    user <- Acid.query db (GetUser u)
+                    print user
+             , do u <- thingArg
+                  return $ do
+                    user <- Acid.query db (GetUserByNick u)
+                    print user
+             ]
+      ]

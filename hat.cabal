@@ -26,12 +26,13 @@ source-repository head
 executable hat
   main-is:             Main.hs
   other-modules:
-    Types
+    DB
     Utils
     JS
   build-depends:       MonadRandom
                      , Spock
                      , Spock-lucid == 0.2.*
+                     , slave-thread
                      , acid-state
                      , base >=4.8 && <5
                      , base-prelude == 1.*
@@ -42,6 +43,7 @@ executable hat
                      , lucid >= 2.9.5 && < 3
                      , split
                      , random-shuffle
+                     , megaparsec
                      , microlens-platform
                      , mtl
                      , neat-interpolation

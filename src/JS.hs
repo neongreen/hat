@@ -50,6 +50,7 @@ allJSFunctions = JS . T.unlines . map fromJS $ [
   submitWords,
   addPlayerSelf, removePlayerSelf,
   beginGame,
+  generateGroups,
   makeAdmin ]
 
 -- | A class for things that can be converted to Javascript syntax.
@@ -354,6 +355,17 @@ beginGame =
   makeJSFunction "beginGame" ["gameId"]
   [text|
     $.post("/game/" + gameId + "/begin")
+     .done(function () {
+        location.reload();
+     });
+  |]
+
+generateGroups :: JSFunction a => a
+generateGroups =
+  makeJSFunction "generateGroups" ["gameId", "numInput"]
+  [text|
+    num = parseInt($(numInput)[0].value, 10);
+    $.post("/game/" + gameId + "/generate-groups", {num: num})
      .done(function () {
         location.reload();
      });

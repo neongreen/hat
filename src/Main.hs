@@ -21,12 +21,13 @@ import Control.Monad.IO.Class
 import Control.Monad.Random
 -- Text
 import qualified Data.Text as T
+import qualified Data.Text.IO as T
 import qualified Data.Text.Encoding as T
 import Data.Text (Text)
 import NeatInterpolation
 -- Lists
 import Data.List.Index
-import Data.List.Split (chunksOf)
+import Data.List.Split
 -- Vector
 import qualified Data.Vector.Unboxed as U
 -- Randomness
@@ -51,6 +52,8 @@ import System.IO
 import Data.Time
 -- Passwords
 import Crypto.Scrypt
+-- Concurrency
+import qualified SlaveThread as Slave
 
 
 -- Local
@@ -62,8 +65,6 @@ import JS (JS(..), allJSFunctions)
 
 data ServerState = ServerState {
   _db :: DB }
-
-type DB = AcidState GlobalState
 
 -- | Update something in the database.
 dbUpdate :: (MonadIO m, HasSpock m, SpockState m ~ ServerState,
@@ -117,7 +118,11 @@ main = do
                 when (ss /= ssOld) $ do
                   Acid.update db SetDirty
                   Acid.update db (SetSessions ss) } } }
-    runSpock 7070 $ spock spockConfig $ do
+    Slave.fork $ forever $ do
+      putStr "> "
+      cmd <- T.getLine
+      execCommand db cmd
+    runSpockNoBanner 7070 $ spock spockConfig $ do
       middleware (staticPolicy (addBase "static"))
       Spock.get "/js.js" $ do
         setHeader "Content-Type" "application/javascript; charset=utf-8"
@@ -334,6 +339,26 @@ gameMethods = do
     dbUpdate (SetGameBegun gameId True)
     jsonSuccess
 
+  Spock.post (gameVar <//> "generate-groups") $ \gameId -> do
+    currentAdmin <- isAdmin
+    num <- param' "num"
+    game <- dbQuery (GetGame gameId)
+    when (not currentAdmin) $
+      jsonFail "You're not an admin"
+    when (not (game^.begun)) $
+      jsonFail "The game has not yet begun"
+    when (game^.ended) $
+      jsonFail "The game has already ended"
+    when (num < 1) $
+      jsonFail "The number of groups is less than 1"
+    let pls = S.size (game^.players)
+    when (num > pls) $
+      jsonFail "There are more groups than players"
+    let gs = concatMap (\(n, p) -> replicate n p) (calcBreak num pls)
+    ps <- shuffleM (S.toList (game^.players))
+    let grouped = splitPlaces gs ps
+    dbUpdate (SetGameGroups gameId (Just grouped))
+
   Spock.post (gameVar <//> "players" <//> "add-self") $ \gameId -> do
     sess <- readSession
     game <- dbQuery (GetGame gameId)
@@ -431,6 +456,7 @@ gamePage gameId = do
   game <- dbQuery (GetGame gameId)
   creator <- dbQuery (GetUser (game^.createdBy))
   players' <- mapM (dbQuery . GetUser) $ S.toList (game^.players)
+  groups' <- (_Just.each.each) (dbQuery . GetUser) $ game^.groups
   currentAdmin <- isAdmin
   lucidIO $ wrapPage sess s (game^.title <> " | Hat") $ do
     h2_ (toHtml (game^.title))
@@ -477,19 +503,19 @@ gamePage gameId = do
               p_ "You didn't propose words for this game."
             Just ws -> do
               p_ "Your proposed words for the game were:"
-              for_ ws $ \w -> li_ (toHtml w)
+              ul_ $ for_ ws $ \w -> li_ (toHtml w)
 
       case (S.member u (game^.players), game^.wordReq, game^.ended) of
         (False, _, False) -> do
           errorId <- randomLongUid
-          button "Register" $
+          button "Register" [] $
             JS.addPlayerSelf (JS.selectUid errorId, game^.uid)
           div_ [uid_ errorId, style_ "display:none"] ""
         (False, _, True) ->
           p_ "You didn't participate in this game."
         (_, Nothing, False) -> do
           errorId <- randomLongUid
-          button "Unregister" $
+          button "Unregister" [] $
             JS.removePlayerSelf (JS.selectUid errorId, game^.uid)
           div_ [uid_ errorId, style_ "display:none"] ""
           p_ ""
@@ -498,7 +524,7 @@ gamePage gameId = do
           return ()  -- game has ended, nobody asked for words
         (_, Just req, False) -> do
           errorId <- randomLongUid
-          button "Unregister" $
+          button "Unregister" [] $
             JS.removePlayerSelf (JS.selectUid errorId, game^.uid)
           div_ [uid_ errorId, style_ "display:none"] ""
           p_ ""
@@ -512,8 +538,27 @@ gamePage gameId = do
           (format "/game/{}/words/printable" [game^.uid])
         emptySpan "1rem"
       when (not (game^.begun)) $
-        button "Begin the game" $
+        button "Begin the game" [] $
           JS.beginGame [game^.uid]
+      p_ ""
+      when (game^.begun) $ do
+        p_ $ do
+          let pls = S.size (game^.players)
+          toHtml $ format "There are {} player{}. "
+            (pls, if pls == 1 then "" else "s" :: Text)
+          "How many groups do you want?"
+        numId <- randomLongUid
+        input_ [uid_ numId, type_ "number", value_ "1",
+                style_ "width: 30%; margin-right: 1em;"]
+        button "Generate" [] $
+          JS.generateGroups (game^.uid, JS.selectUid numId)
+        case groups' of
+          Nothing -> return ()
+          Just gs -> ul_ $ do
+            for_ gs $ \g -> li_ $ do
+              toHtml $ format "{} player{}: "
+                (length g, if length g == 1 then "" else "s"::Text)
+              sequence_ $ intersperse ", " (map userLink g)
 
 userMethods :: SpockM ctx Session ServerState ()
 userMethods = do
@@ -525,7 +570,7 @@ userMethods = do
     lucidIO $ wrapPage sess s ((user^.name) <> " | Hat") $ do
       h2_ $ toHtml $ user^.name <> " (aka " <> user^.nick <> ")"
       when (currentAdmin && not (user^.admin)) $
-        button "Make admin" $
+        button "Make admin" [] $
           JS.makeAdmin [nick']
       when (user^.admin) $
         p_ "One of the admins."
@@ -547,8 +592,9 @@ userLink :: Monad m => User -> HtmlT m ()
 userLink user = mkLink (toHtml (user^.name))
                        ("/user/" <> user^.nick)
 
-button :: Monad m => Text -> JS -> HtmlT m ()
-button caption js = button_ [onClick js] (toHtml caption)
+button :: Monad m => Text -> [Attribute] -> JS -> HtmlT m ()
+button caption attrs js =
+  button_ (onClick js : attrs) (toHtml caption)
 
 buttonLink :: Monad m => Text -> [Attribute] -> Url -> HtmlT m ()
 buttonLink caption attrs link =
@@ -578,13 +624,23 @@ jsonFormFail field err = json (False, field, err)
 jsonSuccess :: MonadIO m => ActionCtxT ctx m a
 jsonSuccess = json (True, "" :: Text)
 
+data Rating = Rating [(Int, Double)]
+  deriving Eq
+
+instance Show Rating where
+  show (Rating xs) = concatMap (\(a,s) -> printf "%d/%.2f " a s) xs
+
+instance Ord Rating where
+  compare (Rating a) (Rating b) = compare (map fst a) (map fst b)
+                               <> compare (map snd a) (map snd b)
+
 rateSolution
   :: Int                  -- ^ Player count
   -> U.Vector (Int, Int)  -- ^ Past games
   -> U.Vector (Int, Int)  -- ^ Solution
-  -> [(Int, Double)]
+  -> Rating
 rateSolution pc past future =
-  sort . map rate . IM.elems $
+  Rating . sort . map rate . IM.elems $
   U.ifoldl (\mp turn (a, b) -> mp & ix a %~ (turn:) & ix b %~ (turn:))
            (IM.fromList (map (, []) [0..pc-1]))
            (past <> future)
@@ -595,30 +651,30 @@ rateSolution pc past future =
            then (0, 0)
            else (minimum ds, fromIntegral (sum ds) / fromIntegral (length ds))
 
-printRating :: [(Int, Double)] -> IO ()
-printRating xs = mapM_ (\(a,s) -> printf "%d/%.2f " a s) xs >> putStrLn ""
-
 -- https://en.wikipedia.org/wiki/Simulated_annealing
 findSchedule
   :: Int                          -- ^ Player count
   -> U.Vector (Int, Int)          -- ^ Past games
   -> Int                          -- ^ Iterations
   -> IO (U.Vector (Int, Int))     -- ^ Solution
-findSchedule pc past kmax =
+findSchedule pc past kmax = do
+  future <- fmap U.fromList $ shuffleM $
+    [(x, y) | x <- [0..pc-1], y <- [0..pc-1], x/=y] \\ U.toList past
+  let rfuture = rateSolution pc past future
   if U.null future then return past
     else go (future, rfuture) (future, rfuture) kmax
   where
-    future = U.fromList $
-      [(x, y) | x <- [0..pc-1], y <- [0..pc-1], x/=y] \\ U.toList past
-    rfuture = rateSolution pc past future
-    rate :: [(Int, Double)] -> Double
-    rate xs = sum (imap (\i (m,s) -> 0.9^^i * fromIntegral m * s) xs)
-            * fromIntegral (fst (head xs))^(2::Int)
-    p e e' t = if e' > e then 1 else exp (-(rate e - rate e')/t)
+    rate :: Rating -> Double
+    rate (Rating xs) =
+      sum (imap (\i (m,s) -> 0.9^^i * fromIntegral (sqr m) * s) xs) *
+      fromIntegral (fst (head xs))
+    p e e' t = let ae = rate e
+                   ae' = rate e'
+               in if ae' > ae then 1 else exp (-(ae - ae')/t)
     go _       (sbest, _)      0 = return sbest
     go (s, rs) (sbest, rsbest) k = do
       s' <- swap2 s
-      let t = 0.9999^^(kmax-k)
+      let t = 0.99999**(fromIntegral (kmax-k))
           rs' = rateSolution pc past s'
       rnd <- randomIO
       let (sbest', rsbest')
@@ -634,6 +690,16 @@ swap2 xs = do
   i <- randomRIO (0, len-1)
   j <- randomRIO (0, len-1)
   return (U.unsafeUpd xs [(i, U.unsafeIndex xs j), (j, U.unsafeIndex xs i)])
+
+calcBreak
+  :: Int               -- ^ Number of groups
+  -> Int               -- ^ Number of people
+  -> [(Int, Int)]      -- ^ (groups, people in group)
+calcBreak x n =
+  let (people, extra) = divMod n x
+  in  if extra == 0 then [(x, people)]
+                    else [(extra, people+1), (x-extra, people)]
+
 sqr :: Num a => a -> a
 sqr a = a*a
 
