@@ -302,10 +302,9 @@ makeAcidic ''GlobalState [
   'setDirty, 'unsetDirty
   ]
 
--- TODO: handle ""s correctly
 execCommand :: DB -> String -> IO ()
 execCommand db s = do
-  let res = execParserPure (prefs showHelpOnError) parserInfo (words s)
+  let res = execParserPure (prefs showHelpOnError) parserInfo (breakArgs s)
   case res of
     Success ((), io) -> io
     Failure f -> do
@@ -313,6 +312,14 @@ execCommand db s = do
       putStrLn msg
     CompletionInvoked _ -> error "completion invoked"
   where
+    breakArgs "" = []
+    breakArgs (x:xs)
+      | x == '"'  = let (l, r) = break (== '"') xs
+                    in read (x:l++"\"") : breakArgs (drop 1 r)
+      | isSpace x = breakArgs xs
+      | otherwise = let (l, r) = break (\c -> isSpace c || c == '"') xs
+                    in (x:l) : breakArgs r
+
     userArg = argument
       (do input <- T.pack <$> str
           return $ case T.stripPrefix "id:" input of
