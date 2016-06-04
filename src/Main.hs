@@ -118,8 +118,10 @@ main = do
                   Acid.update db (SetSessions ss) } } }
     Slave.fork $ forever $ do
       putStr "> "
-      cmd <- T.getLine
+      cmd <- getLine
+      putStrLn ""
       execCommand db cmd
+      putStrLn ""
     runSpockNoBanner 7070 $ spock spockConfig $ do
       middleware (staticPolicy (addBase "static"))
       Spock.get "/js.js" $ do

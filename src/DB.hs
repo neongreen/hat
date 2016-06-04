@@ -92,10 +92,8 @@ import Data.Acid as Acid
 import Data.SafeCopy
 -- Passwords
 import Crypto.Scrypt
--- Parsing
-import Text.Megaparsec
-import Text.Megaparsec.Text
-import qualified Text.Megaparsec.Lexer as L
+-- Command-line parsing
+import Options.Applicative.Simple
 
 -- Local
 import Utils
@@ -304,47 +302,62 @@ makeAcidic ''GlobalState [
   'setDirty, 'unsetDirty
   ]
 
-execCommand :: DB -> Text -> IO ()
-execCommand db str = case parse p "" str of
-  Left err -> putStr (parseErrorPretty err)
-  Right io -> io >> putStrLn ""
+-- TODO: handle ""s correctly
+execCommand :: DB -> String -> IO ()
+execCommand db s = do
+  let res = execParserPure (prefs showHelpOnError) parserInfo (words s)
+  case res of
+    Success ((), io) -> io
+    Failure f -> do
+      let (msg, _) = renderFailure f ""
+      putStrLn msg
+    CompletionInvoked _ -> error "completion invoked"
   where
-    command = L.symbol space
-    arg = L.lexeme space
-    strArg = T.pack <$> arg (char '"' >> L.charLiteral `manyTill` (char '"'))
-    thingArg = T.pack <$> arg (some (satisfy (not . isSpace)))
-    uidArg = Uid <$> thingArg
-    p :: Parser (IO ())
-    p = choice
-      [ do command "exit"
-           return $
-             exitSuccess
-      , do command "sessions?"
-           return $ do
-             ss <- Acid.query db GetSessions
-             for_ ss $ \(_, t, s) -> do
-               printf "  * %s: %s\n" (show t) (show s)
-      , do command "user?"
-           choice
-             [ do u <- (string "id:" >> uidArg) <?> "id:<uid>"
-                  return $ do
-                    user <- Acid.query db (GetUser u)
-                    print user
-             , do u <- thingArg <?> "nick"
-                  return $ do
-                    user <- Acid.query db (GetUserByNick u)
-                    print user
-             ]
-      , do command "add" >> command "user"
-           nick'  <- thingArg <?> "nick"
-           name'  <- strArg <?> "name"
-           pass'  <- strArg <?> "password"
-           email' <- strArg <?> "email"
-           return $ do
-             uid' <- randomShortUid
-             now  <- getCurrentTime
-             encPass <- encryptPassIO' (Pass (T.encodeUtf8 pass'))
-             Acid.update db $
-               AddUser uid' nick' name' encPass email' now
-             printf "uid: %s\n" (T.unpack (uidToText uid'))
-      ]
+    userArg = argument
+      (do input <- T.pack <$> str
+          return $ case T.stripPrefix "id:" input of
+            Nothing -> Right input
+            Just x  -> Left (Uid x))
+      (metavar "(NICK|id:ID)")
+
+    findUser = either (Acid.query db . GetUser)
+                      (Acid.query db . GetUserByNick)
+
+    parserInfo = info parser mempty
+    parser = simpleParser (pure ()) $ do
+
+      addCommand "exit"
+        "Stop the server"
+        (const $ do
+           exitSuccess)
+        (pure ())
+
+      addCommand "sessions?"
+        "Print open sessions"
+        (const $ do
+           ss <- Acid.query db GetSessions
+           for_ ss $ \(_, time, content) -> do
+             printf "  * %s: %s\n" (show time) (show content))
+        (pure ())
+
+      addCommand "user?"
+        "Show information about a user"
+        (\u -> do
+           user <- findUser u
+           print user)
+        userArg
+
+      addCommand "add-user"
+        "Create a new user"
+        (\(nick', name', pass', email') -> do
+           uid' <- randomShortUid
+           now  <- getCurrentTime
+           encPass <- encryptPassIO' (Pass (T.encodeUtf8 pass'))
+           Acid.update db $
+             AddUser uid' nick' name' encPass email' now
+           printf "uid: %s\n" (T.unpack (uidToText uid')))
+        (fmap (each %~ T.pack) $
+           (,,,) <$> strArgument (metavar "NICK")
+                 <*> strArgument (metavar "NAME")
+                 <*> strArgument (metavar "PASS")
+                 <*> strArgument (metavar "EMAIL"))

@@ -32,7 +32,6 @@ executable hat
   build-depends:       MonadRandom
                      , Spock
                      , Spock-lucid == 0.2.*
-                     , slave-thread
                      , acid-state
                      , base >=4.8 && <5
                      , base-prelude == 1.*
@@ -41,15 +40,18 @@ executable hat
                      , hashable
                      , ilist
                      , lucid >= 2.9.5 && < 3
-                     , split
-                     , random-shuffle
                      , megaparsec
                      , microlens-platform
                      , mtl
                      , neat-interpolation
+                     , optparse-applicative
+                     , optparse-simple
                      , path-pieces
+                     , random-shuffle
                      , safecopy
                      , scrypt
+                     , slave-thread
+                     , split
                      , text-all == 0.2.*
                      , time
                      , transformers
