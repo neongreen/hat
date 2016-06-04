@@ -94,6 +94,8 @@ import Data.SafeCopy
 import Crypto.Scrypt
 -- Command-line parsing
 import Options.Applicative.Simple
+-- Exception handling
+import Control.Exception.Enclosed
 
 -- Local
 import Utils
@@ -306,7 +308,10 @@ execCommand :: DB -> String -> IO ()
 execCommand db s = do
   let res = execParserPure (prefs showHelpOnError) parserInfo (breakArgs s)
   case res of
-    Success ((), io) -> io
+    Success ((), io) -> catchAny io $ \e ->
+      if isJust (fromException e :: Maybe ExitCode)
+        then throwIO e
+        else print e
     Failure f -> do
       let (msg, _) = renderFailure f ""
       putStrLn msg

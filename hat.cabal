@@ -51,6 +51,7 @@ executable hat
                      , safecopy
                      , scrypt
                      , slave-thread
+                     , enclosed-exceptions
                      , split
                      , text-all == 0.2.*
                      , time
