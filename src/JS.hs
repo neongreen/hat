@@ -46,7 +46,7 @@ allJSFunctions = JS . T.unlines . map fromJS $ [
   -- Other
   submitWords,
   addPlayerSelf, removePlayerSelf,
-  beginGame,
+  endPreregistration,
   generateGroups,
   makeAdmin ]
 
@@ -347,9 +347,9 @@ removePlayerSelf =
      });
   |]
 
-beginGame :: JSFunction a => a
-beginGame =
-  makeJSFunction "beginGame" ["gameId"]
+endPreregistration :: JSFunction a => a
+endPreregistration =
+  makeJSFunction "endPreregistration" ["gameId"]
   [text|
     $.post("/game/" + gameId + "/begin")
      .done(function () {

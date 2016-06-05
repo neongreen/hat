@@ -539,8 +539,8 @@ gamePage gameId = do
           (T.format "/game/{}/words/printable" [game^.uid])
         emptySpan "1rem"
       when (not (game^.begun)) $
-        button "Begin the game" [] $
-          JS.beginGame [game^.uid]
+        button "End the preregistration phase" [] $
+          JS.endPreregistration [game^.uid]
       p_ ""
       when (game^.begun) $ do
         p_ $ do
