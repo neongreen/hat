@@ -335,39 +335,52 @@ execCommand db s = do
     findUser = either (Acid.query db . GetUser)
                       (Acid.query db . GetUserByNick)
 
+    addCommand' cmd descr act = addCommand cmd descr (const act) (pure ())
+
     parserInfo = info parser mempty
     parser = simpleParser (pure ()) $ do
 
-      addCommand "exit"
+      addCommand' "exit"
         "Stop the server"
-        (const $ do
-           exitSuccess)
-        (pure ())
+        (exitSuccess)
 
-      addCommand "sessions?"
+      addCommand' "sessions"
         "Print open sessions"
-        (const $ do
-           ss <- Acid.query db GetSessions
-           for_ ss $ \(_, time, content) -> do
-             printf "  * %s: %s\n" (show time) (show content))
-        (pure ())
+        (do ss <- Acid.query db GetSessions
+            for_ ss $ \(_, time, content) -> do
+              printf "  * %s: %s\n" (show time) (show content)
+        )
 
-      addCommand "user?"
+      addCommand "user"
         "Show information about a user"
         (\u -> do
-           user <- findUser u
-           print user)
+            user <- findUser u
+            printf "%s (%s)\n" (user^.name) (user^.nick)
+            printf "\n"
+            printf "  * uid       %s\n" (uidToText (user^.uid))
+            printf "  * email     %s\n" (user^.email)
+            printf "  * created   %s\n" (show (user^.created))
+            printf "  * admin     %s\n" (show (user^.admin))
+        )
         userArg
+
+      addCommand' "users"
+        "Print all users"
+        (do us <- view users <$> Acid.query db GetGlobalState
+            for_ us $ \u ->
+              printf "  * %s (%s)\n" (u^.name) (u^.nick)
+        )
 
       addCommand "add-user"
         "Create a new user"
         (\(nick', name', pass', email') -> do
-           uid' <- randomShortUid
-           now  <- getCurrentTime
-           encPass <- encryptPassIO' (Pass (T.encodeUtf8 pass'))
-           Acid.update db $
-             AddUser uid' nick' name' encPass email' now
-           printf "uid: %s\n" (T.unpack (uidToText uid')))
+            uid' <- randomShortUid
+            now  <- getCurrentTime
+            encPass <- encryptPassIO' (Pass (T.encodeUtf8 pass'))
+            Acid.update db $
+              AddUser uid' nick' name' encPass email' now
+            printf "uid: %s\n" (uidToText uid')
+        )
         (fmap (each %~ T.pack) $
            (,,,) <$> strArgument (metavar "NICK")
                  <*> strArgument (metavar "NAME")
