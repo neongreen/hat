@@ -549,7 +549,8 @@ gamePage gameId = do
             (pls, if pls == 1 then "" else "s" :: Text)
           "How many groups do you want?"
         numId <- randomLongUid
-        input_ [uid_ numId, type_ "number", value_ "1",
+        input_ [uid_ numId, type_ "number",
+                value_ (maybe "1" (T.show . length) groups'),
                 style_ "width: 30%; margin-right: 1em;"]
         button "Generate" [] $
           JS.generateGroups (game^.uid, JS.selectUid numId)

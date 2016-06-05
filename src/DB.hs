@@ -251,12 +251,15 @@ addUser uid' nick' name' pass' email' now = do
   return user
 
 addPlayer :: Uid Game -> Uid User -> Acid.Update GlobalState ()
-addPlayer gameId userId = gameById gameId . players %= S.insert userId
+addPlayer gameId userId = do
+  gameById gameId . players %= S.insert userId
+  gameById gameId . groups .= Nothing
 
 removePlayer :: Uid Game -> Uid User -> Acid.Update GlobalState ()
 removePlayer gameId userId = do
   gameById gameId . players %= S.delete userId
   gameById gameId . wordReq . _Just . userWords . at userId .= Nothing
+  gameById gameId . groups .= Nothing
 
 getUser :: Uid User -> Acid.Query GlobalState User
 getUser uid' = view (userById uid')
@@ -365,13 +368,13 @@ execCommand db s = do
         userArg
 
       addCommand' "users"
-        "Print all users"
+        "List users"
         (do us <- view users <$> Acid.query db GetGlobalState
             for_ us $ \u ->
               printf "  * %s (%s)\n" (u^.name) (u^.nick)
         )
 
-      addCommand "add-user"
+      addCommand "users.add"
         "Create a new user"
         (\(nick', name', pass', email') -> do
             uid' <- randomShortUid
@@ -386,3 +389,19 @@ execCommand db s = do
                  <*> strArgument (metavar "NAME")
                  <*> strArgument (metavar "PASS")
                  <*> strArgument (metavar "EMAIL"))
+
+      addCommand' "games"
+        "List games"
+        (do gs <- view games <$> Acid.query db GetGlobalState
+            for_ gs $ \game ->
+              printf "  * %s (%s)\n" (game^.title) (uidToText (game^.uid))
+        )
+
+      addCommand "game.reg"
+        "Register a user for the game"
+        (\(g, u) -> do
+            user <- findUser u
+            Acid.update db (AddPlayer g (user^.uid))
+        )
+        ((,) <$> (Uid . T.pack <$> strArgument (metavar "GAME"))
+             <*> userArg)
