@@ -26,19 +26,32 @@ module DB
     pass,
     admin,
   WordReq(..),
-    userWords,
-    wordsPerUser,
+    submitted,
+    perUser,
   Game(..),
     title,
     createdBy,
     registerUntil,
     begun,
     ended,
-    players,
     wordReq,
     groups,
+    pastPhases,
+    currentPhase,
+  Phase(..),
+  PhaseResults(..),
+    winners,
+  Round(..),
+    score,
+    namerPenalty,
+    guesserPenalty,
+  ScheduleStatus(..),
+  Room(..),
+    table,
+    schedule,
   GlobalState(..),
     games,
+    rooms,
     users,
     sessions,
     dirty,
@@ -47,9 +60,10 @@ module DB
   -- * Common lenses
   uid,
   created,
+  players,
 
   -- * Stuff
-  sampleState,
+  emptyState,
   userById,
   execCommand,
 
@@ -61,9 +75,11 @@ module DB
   GetUser(..),
   GetUserByNick(..), GetUserByNick'(..),
   SetAdmin(..),
+  AddGame(..),
   GetGame(..),
   SetGameBegun(..),
   SetGameGroups(..),
+  SetGameCurrentPhase(..),
   SetWords(..),
   SetDirty(..), UnsetDirty(..),
 )
@@ -83,6 +99,9 @@ import Data.Set (Set)
 -- Text
 import qualified Data.Text.All as T
 import Data.Text.All (Text)
+-- Randomness
+import Control.Monad.Random
+import System.Random.Shuffle
 -- Time
 import Data.Time
 -- Web
@@ -99,7 +118,7 @@ import Control.Exception.Enclosed
 
 -- Local
 import Utils
-
+import Schedule
 
 
 data User = User {
@@ -112,18 +131,42 @@ data User = User {
   _userAdmin :: Bool }
   deriving (Show)
 
-deriveSafeCopySimple 0 'base ''User
-makeFields ''User
-
 type Session = Maybe (Uid User)
 
 data WordReq = WordReq {
-  _wordReqUserWords :: Map (Uid User) (Set Text),
-  _wordReqWordsPerUser :: Int }
+  -- | Already submitted words
+  _wordReqSubmitted :: Map (Uid User) (Set Text),
+  -- | How many words each user should submit
+  _wordReqPerUser :: Int }
   deriving (Show)
 
-deriveSafeCopySimple 0 'base ''WordReq
-makeFields ''WordReq
+data Round
+  = RoundNotYetPlayed
+  | RoundPlayed {
+      _roundScore          :: Int,
+      _roundNamerPenalty   :: Int,
+      _roundGuesserPenalty :: Int }
+  | RoundImpossible            -- e.g. the user can't play against themself
+  deriving (Show)
+
+data ScheduleStatus
+  = ScheduleCalculating PartialSchedule
+  | ScheduleDone Schedule
+  deriving (Show)
+
+data Phase = Phase {
+  _phaseRooms :: [Room] }
+  deriving (Show)
+
+data PhaseResults = Results {
+  _phaseResultsWinners :: [[Uid User]] }
+  deriving (Show)
+
+data Room = Room {
+  _roomPlayers :: [Uid User],
+  _roomTable :: Map (Uid User, Uid User) Round,
+  _roomSchedule :: ScheduleStatus }
+  deriving (Show)
 
 data Game = Game {
   _gameUid :: Uid Game,
@@ -134,21 +177,39 @@ data Game = Game {
   _gameBegun :: Bool,
   _gameEnded :: Bool,
   _gamePlayers :: Set (Uid User),
-  _gameGroups :: Maybe [[Uid User]] }
+  -- | A generated division of players into groups
+  _gameGroups :: Maybe [[Uid User]],
+  _gamePastPhases :: [(Phase, PhaseResults)],
+  _gameCurrentPhase :: Maybe Phase }
   deriving (Show)
 
+deriveSafeCopySimple 0 'base ''User
+deriveSafeCopySimple 0 'base ''WordReq
+deriveSafeCopySimple 0 'base ''Round
+deriveSafeCopySimple 0 'base ''ScheduleStatus
+deriveSafeCopySimple 0 'base ''Phase
+deriveSafeCopySimple 0 'base ''PhaseResults
+deriveSafeCopySimple 0 'base ''Room
 deriveSafeCopySimple 0 'base ''Game
+
+makeFields ''User
+makeFields ''WordReq
+makeFields ''Round
+makeFields ''ScheduleStatus
+makeFields ''Phase
+makeFields ''PhaseResults
+makeFields ''Room
 makeFields ''Game
 
 data GlobalState = GlobalState {
-  _users    :: [User],
-  _games    :: [Game],
-  _sessions :: [(SessionId, UTCTime, Session)],
-  _dirty    :: Bool }
+  _globalStateUsers    :: [User],
+  _globalStateGames    :: [Game],
+  _globalStateSessions :: [(SessionId, UTCTime, Session)],
+  _globalStateDirty    :: Bool }
   deriving (Show)
 
 deriveSafeCopySimple 0 'base ''GlobalState
-makeLenses ''GlobalState
+makeFields ''GlobalState
 
 type DB = AcidState GlobalState
 
@@ -176,44 +237,12 @@ gameById uid' = singular $
   error ("gameById: couldn't find game with uid " ++
          T.unpack (uidToText uid'))
 
-sampleState :: GlobalState
-sampleState = GlobalState {
-  _users = [
-      User {
-          _userUid = "user-cooler-100",
-          _userNick = "cooler",
-          _userName = "Mr. Cooler",
-          _userCreated = read "2016-05-20 12:20:06 UTC",
-          _userEmail = "cooler@gmail.com",
-          _userPass = encryptPass' salt (Pass "password"),
-          _userAdmin = True } ],
-  _games = [
-      Game {
-          _gameUid = "game-awesome-100",
-          _gameTitle = "Awesome game",
-          _gameCreatedBy = "user-cooler-100",
-          _gameWordReq = Just $ WordReq {
-              _wordReqUserWords = mempty,
-              _wordReqWordsPerUser = 10 },
-          _gameRegisterUntil = read "2016-06-03 12:20:06 UTC",
-          _gameBegun = False,
-          _gameEnded = False,
-          _gamePlayers = S.fromList ["user-cooler-100"],
-          _gameGroups = Nothing },
-      Game {
-          _gameUid = "game-boring-200",
-          _gameTitle = "Boring game",
-          _gameCreatedBy = "user-cooler-100",
-          _gameWordReq = Nothing,
-          _gameRegisterUntil = read "2016-05-25 12:20:06 UTC",
-          _gameBegun = True,
-          _gameEnded = True,
-          _gamePlayers = mempty,
-          _gameGroups = Nothing } ],
-  _sessions = [],
-  _dirty = True }
-  where
-    salt = Salt "*xxxPxxxxxx)xHL#nx~z2xPxxxxvxxx#"
+emptyState :: GlobalState
+emptyState = GlobalState {
+  _globalStateUsers = [],
+  _globalStateGames = [],
+  _globalStateSessions = [],
+  _globalStateDirty = True }
 
 -- | A useful lens operator that modifies something and returns the old value.
 (<<.=) :: MonadState s m => LensLike ((,) a) s s a b -> b -> m a
@@ -258,7 +287,7 @@ addPlayer gameId userId = do
 removePlayer :: Uid Game -> Uid User -> Acid.Update GlobalState ()
 removePlayer gameId userId = do
   gameById gameId . players %= S.delete userId
-  gameById gameId . wordReq . _Just . userWords . at userId .= Nothing
+  gameById gameId . wordReq . _Just . submitted . at userId .= Nothing
   gameById gameId . groups .= Nothing
 
 getUser :: Uid User -> Acid.Query GlobalState User
@@ -273,6 +302,30 @@ getUserByNick' nick' = preview (userByNick' nick')
 setAdmin :: Uid User -> Bool -> Acid.Update GlobalState ()
 setAdmin userId adm = userById userId . admin .= adm
 
+addGame
+  :: Uid Game           -- ^ Uid
+  -> Text               -- ^ Title
+  -> Uid User           -- ^ Created by
+  -> Maybe WordReq      -- ^ Word requirements
+  -> UTCTime            -- ^ “Register until”
+  -> Set (Uid User)     -- ^ Initial set of players
+  -> Acid.Update GlobalState Game
+addGame uid' title' createdBy' wordReq' registerUntil' players' = do
+  let game' = Game {
+        _gameUid = uid',
+        _gameTitle = title',
+        _gameCreatedBy = createdBy',
+        _gameWordReq = wordReq',
+        _gameRegisterUntil = registerUntil',
+        _gameBegun = False,
+        _gameEnded = False,
+        _gamePlayers = players',
+        _gameGroups = Nothing,
+        _gamePastPhases = mempty,
+        _gameCurrentPhase = Nothing }
+  games %= (game':)
+  return game'
+
 getGame :: Uid Game -> Acid.Query GlobalState Game
 getGame uid' = view (gameById uid')
 
@@ -282,9 +335,12 @@ setGameBegun gameId val = gameById gameId . begun .= val
 setGameGroups :: Uid Game -> Maybe [[Uid User]] -> Acid.Update GlobalState ()
 setGameGroups gameId val = gameById gameId . groups .= val
 
+setGameCurrentPhase :: Uid Game -> Phase -> Acid.Update GlobalState ()
+setGameCurrentPhase gameId val = gameById gameId . currentPhase .= Just val
+
 setWords :: Uid Game -> Uid User -> [Text] -> Acid.Update GlobalState ()
 setWords gameId userId ws =
-  gameById gameId.wordReq._Just.userWords.at userId .= Just (S.fromList ws)
+  gameById gameId.wordReq._Just.submitted.at userId .= Just (S.fromList ws)
 
 setDirty :: Acid.Update GlobalState ()
 setDirty = dirty .= True
@@ -300,9 +356,11 @@ makeAcidic ''GlobalState [
   'getUser,
   'getUserByNick, 'getUserByNick',
   'setAdmin,
+  'addGame,
   'getGame,
   'setGameBegun,
   'setGameGroups,
+  'setGameCurrentPhase,
   'setWords,
   'setDirty, 'unsetDirty
   ]
@@ -393,8 +451,8 @@ execCommand db s = do
       addCommand' "games"
         "List games"
         (do gs <- view games <$> Acid.query db GetGlobalState
-            for_ gs $ \game ->
-              printf "  * %s (%s)\n" (game^.title) (uidToText (game^.uid))
+            for_ gs $ \g ->
+              printf "  * %s (%s)\n" (g^.title) (uidToText (g^.uid))
         )
 
       addCommand "game.reg"
@@ -405,3 +463,41 @@ execCommand db s = do
         )
         ((,) <$> (Uid . T.pack <$> strArgument (metavar "GAME"))
              <*> userArg)
+
+      addCommand' "populate"
+        "Generate random users and games"
+        (do -- generating users
+            putStrLn "Generating users u{0..199}"
+            putStrLn "(passwords = nicks; users 0..19 are admins)"
+            generatedUsers <- for [0..199::Int] $ \i -> do
+              let nick' = T.format "u{}" [i]
+                  name' = T.format "User #{}" [i]
+                  email' = T.format "u{}@hat.hat" [i]
+              uid' <- randomShortUid
+              now  <- getCurrentTime
+              encPass <- encryptPassIO' (Pass (T.encodeUtf8 nick'))
+              u <- Acid.update db $
+                AddUser uid' nick' name' encPass email' now
+              when (i < 20) $ Acid.update db $
+                SetAdmin uid' True
+              when (i `mod` 10 == 0) $
+                putStr "."
+              return u
+            putStrLn ""
+            -- generating games
+            putStrLn "Generating games g{0..9} with n×10 players in each"
+            for_ [0..9::Int] $ \i -> do
+              let title' = T.format "Game-{}" [i]
+                  wordReq' = Just (WordReq mempty 10)
+              players' <- S.fromList . map (view uid) . take (i*10) <$>
+                            shuffleM generatedUsers
+              delay <- (60 *) <$> getRandomR (0, 120::Int)
+              registerUntil' <- addUTCTime (fromIntegral delay) <$>
+                                  getCurrentTime
+              uid' <- randomShortUid
+              createdBy' <- view uid <$> uniform generatedUsers
+              Acid.update db $
+                AddGame uid' title' createdBy' wordReq' registerUntil' players'
+              putStr "."
+            putStrLn ""
+        )

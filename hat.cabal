@@ -29,6 +29,7 @@ executable hat
     DB
     Utils
     JS
+    Schedule
   build-depends:       MonadRandom
                      , Spock
                      , Spock-lucid == 0.2.*
@@ -37,7 +38,9 @@ executable hat
                      , base-prelude == 1.*
                      , containers
                      , directory
+                     , enclosed-exceptions
                      , hashable
+                     , http-types
                      , ilist
                      , lucid >= 2.9.5 && < 3
                      , megaparsec
@@ -51,7 +54,6 @@ executable hat
                      , safecopy
                      , scrypt
                      , slave-thread
-                     , enclosed-exceptions
                      , split
                      , text-all == 0.2.*
                      , time

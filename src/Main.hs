@@ -18,7 +18,6 @@ import BasePrelude
 import Lens.Micro.Platform hiding ((&))
 -- Monads
 import Control.Monad.IO.Class
-import Control.Monad.Random
 -- Text
 import qualified Data.Text.All as T
 import Data.Text.All (Text)
@@ -26,15 +25,12 @@ import NeatInterpolation
 -- Lists
 import Data.List.Index
 import Data.List.Split
--- Vector
-import qualified Data.Vector.Unboxed as U
 -- Randomness
+import Control.Monad.Random
 import System.Random.Shuffle
 -- Containers
 import qualified Data.Set as S
 import qualified Data.Map as M
-import Data.Map (Map)
-import qualified Data.IntMap as IM
 -- Web
 import Web.Spock hiding (head, get, text)
 import qualified Web.Spock as Spock
@@ -42,6 +38,7 @@ import Web.Spock.Lucid
 import Lucid hiding (for_)
 import qualified Lucid
 import Network.Wai.Middleware.Static (staticPolicy, addBase)
+import Network.HTTP.Types.Status
 -- acid-state
 import Data.Acid as Acid
 -- IO
@@ -59,6 +56,7 @@ import DB
 import Utils
 import qualified JS
 import JS (JS(..), allJSFunctions)
+import Schedule
 
 
 data ServerState = ServerState {
@@ -97,7 +95,7 @@ gameVar = "game" <//> var
 main :: IO ()
 main = do
   hSetBuffering stdout NoBuffering
-  let prepare = openLocalStateFrom "state/" sampleState
+  let prepare = openLocalStateFrom "state/" emptyState
       finalise db = do
         createCheckpoint' db
         closeAcidState db
@@ -132,9 +130,9 @@ main = do
         sess <- readSession
         lucidIO $ wrapPage sess s "Hat" $ do
           h2_ "Available games"
-          ul_ $ for_ (s ^. games) $ \game ->
-            li_ $ mkLink (toHtml (game^.title))
-                         ("/game/" <> uidToText (game^.uid))
+          ul_ $ for_ (s^.games) $ \g ->
+            li_ $ mkLink (toHtml (g^.title))
+                         ("/game/" <> uidToText (g^.uid))
       gameMethods
       userMethods
 
@@ -149,9 +147,9 @@ main = do
             else do
               let (admins, ordinaryUsers) = partition (view admin) (s^.users)
               h3_ "Admins"
-              p_ $ sequence_ $ intersperse ", " $ map userLink admins
+              p_ $ list $ map userLink admins
               h3_ "Users"
-              p_ $ sequence_ $ intersperse ", " $ map userLink ordinaryUsers
+              p_ $ list $ map userLink ordinaryUsers
 
       Spock.get "login" $ do
         s <- dbQuery GetGlobalState
@@ -329,76 +327,109 @@ gameMethods = do
   Spock.get (gameVar) $ \gameId ->
     gamePage gameId
 
+  Spock.get (gameVar <//> var <//> var) $ \gameId phaseNum roomNum ->
+    roomPage gameId phaseNum roomNum
+
   Spock.post (gameVar <//> "begin") $ \gameId -> do
     currentAdmin <- isAdmin
-    game <- dbQuery (GetGame gameId)
+    game' <- dbQuery (GetGame gameId)
     when (not currentAdmin) $
       jsonFail "You're not an admin"
-    when (game^.begun) $
+    when (game'^.begun) $
       jsonFail "The game has already begun"
     dbUpdate (SetGameBegun gameId True)
     jsonSuccess
 
+  Spock.post (gameVar <//> "begin-next-phase") $ \gameId -> do
+    currentAdmin <- isAdmin
+    game' <- dbQuery (GetGame gameId)
+    when (not currentAdmin) $
+      jsonFail "You're not an admin"
+    when (game'^.ended) $
+      jsonFail "The game has already ended"
+    when (not (game'^.begun)) $
+      jsonFail "The game hasn't yet begun"
+    when (isJust (game'^.currentPhase)) $
+      jsonFail "A phase is already in progress"
+    case game'^.groups of
+      Nothing -> jsonFail "The players haven't been divided into groups"
+      Just gs -> do
+        rooms' <- for gs $ \gr -> do
+          sch <- case precomputedSchedules ^? ix (length gr) of
+            -- TODO: fix
+            Nothing -> error "no known schedule"
+            Just ss -> uniform ss
+          return Room {
+            _roomPlayers = gr,
+            _roomTable = M.fromList [
+                ((a, b), if a==b then RoundImpossible else RoundNotYetPlayed)
+                | a <- gr, b <- gr ],
+            _roomSchedule = ScheduleDone sch }
+        let phase' = Phase {
+              _phaseRooms = rooms' }
+        dbUpdate (SetGameCurrentPhase gameId phase')
+        jsonSuccess
+
   Spock.post (gameVar <//> "generate-groups") $ \gameId -> do
     currentAdmin <- isAdmin
     num <- param' "num"
-    game <- dbQuery (GetGame gameId)
+    game' <- dbQuery (GetGame gameId)
     when (not currentAdmin) $
       jsonFail "You're not an admin"
-    when (not (game^.begun)) $
+    when (not (game'^.begun)) $
       jsonFail "The game has not yet begun"
-    when (game^.ended) $
+    when (game'^.ended) $
       jsonFail "The game has already ended"
     when (num < 1) $
       jsonFail "The number of groups is less than 1"
-    let pls = S.size (game^.players)
+    let pls = S.size (game'^.players)
     when (num > pls) $
       jsonFail "There are more groups than players"
     let gs = concatMap (\(n, p) -> replicate n p) (calcBreak num pls)
-    ps <- shuffleM (S.toList (game^.players))
+    ps <- shuffleM (S.toList (game'^.players))
     let grouped = splitPlaces gs ps
     dbUpdate (SetGameGroups gameId (Just grouped))
 
   Spock.post (gameVar <//> "players" <//> "add-self") $ \gameId -> do
     sess <- readSession
-    game <- dbQuery (GetGame gameId)
+    game' <- dbQuery (GetGame gameId)
     now <- liftIO getCurrentTime
     u <- case sess of
       Nothing -> jsonFail "You're not logged in"
       Just u  -> return u
-    when (u `S.member` (game^.players)) $
+    when (u `S.member` (game'^.players)) $
       jsonFail "You're already registered for this game"
-    when (game^.begun) $
+    when (game'^.begun) $
       jsonFail "This game has already begun"
-    when (now > game^.registerUntil) $
+    when (now > game'^.registerUntil) $
       jsonFail "The pre-registration period has ended"
     dbUpdate (AddPlayer gameId u)
     jsonSuccess
 
   Spock.post (gameVar <//> "players" <//> "remove-self") $ \gameId -> do
     sess <- readSession
-    game <- dbQuery (GetGame gameId)
+    game' <- dbQuery (GetGame gameId)
     u <- case sess of
       Nothing -> jsonFail "You're not logged in"
       Just u  -> return u
-    when (u `S.notMember` (game^.players)) $
+    when (u `S.notMember` (game'^.players)) $
       jsonFail "You aren't registered for this game"
-    when (game^.begun) $
+    when (game'^.begun) $
       jsonFail "The game has already begun, you can't unregister now"
     dbUpdate (RemovePlayer gameId u)
     jsonSuccess
 
   Spock.get (gameVar <//> "words" <//> "printable") $ \gameId -> do
-    game <- dbQuery (GetGame gameId)
+    game' <- dbQuery (GetGame gameId)
     currentAdmin <- isAdmin
     lucidIO $ do
       if not currentAdmin
         then p_ "Only admins can see the words"
-        else case game^.wordReq of
+        else case game'^.wordReq of
           Nothing -> p_ "In this game players don't submit words"
           Just req -> do
             ws <- chunksOf 3 <$>
-              shuffleM (concatMap S.toList (req^..userWords.each))
+              shuffleM (concatMap S.toList (req^..submitted.each))
             table_ $ for_ ws $ \wg -> tr_ $ do
               for_ wg $ \w -> td_ (toHtml w)
             style_ [text|
@@ -415,18 +446,18 @@ gameMethods = do
 
   Spock.post (gameVar <//> "words" <//> "submit") $ \gameId -> do
     sess <- readSession
-    game <- dbQuery (GetGame gameId)
+    game' <- dbQuery (GetGame gameId)
     ws <- T.words <$> param' "words"
     u <- case sess of
       Just u  -> return u
       Nothing -> jsonFormFail "words" "You're not logged in"
-    req <- case game^.wordReq of
+    req <- case game'^.wordReq of
       Just req -> return req
       Nothing  -> jsonFormFail "words"
         "Words aren't required for this game"
-    when (u `S.notMember` (game^.players)) $
+    when (u `S.notMember` (game'^.players)) $
       jsonFormFail "words" "You aren't participating in this game"
-    when (isJust (req^.userWords.at u)) $
+    when (isJust (req^.submitted.at u)) $
       jsonFormFail "words" "You have already submitted words"
     when (length (ordNub ws) < length ws) $
       jsonFormFail "words" "The list contains duplicates"
@@ -434,15 +465,14 @@ gameMethods = do
       jsonFormFail "words" "Punctuation isn't allowed"
     when (null ws) $
       jsonFormFail "words" "You haven't entered any words"
-    when (length ws < req^.wordsPerUser) $
+    when (length ws < req^.perUser) $
       jsonFormFail "words" $
-        T.format "You entered {} word{} out of {}"
-          (length ws, if length ws == 1 then "" else "s" :: Text,
-           req^.wordsPerUser)
-    when (length ws > req^.wordsPerUser) $
+        T.format "You entered {} {} out of {}"
+          (length ws, plural (length ws) "word", req^.perUser)
+    when (length ws > req^.perUser) $
       jsonFormFail "words" $
-        T.format "You entered {} words, that's too many"
-          [length ws]
+        T.format "You entered {} {}, that's too many"
+          (length ws, plural (length ws) "word")
     -- All checks passed
     dbUpdate (SetWords gameId u ws)
     jsonSuccess
@@ -453,38 +483,38 @@ gamePage
 gamePage gameId = do
   s <- dbQuery GetGlobalState
   sess <- readSession
-  game <- dbQuery (GetGame gameId)
-  creator <- dbQuery (GetUser (game^.createdBy))
-  players' <- mapM (dbQuery . GetUser) $ S.toList (game^.players)
-  groups' <- (_Just.each.each) (dbQuery . GetUser) $ game^.groups
+  game' <- dbQuery (GetGame gameId)
+  creator <- dbQuery (GetUser (game'^.createdBy))
+  players' <- mapM (dbQuery . GetUser) $ S.toList (game'^.players)
+  groups' <- (_Just.each.each) (dbQuery . GetUser) $ game'^.groups
   currentAdmin <- isAdmin
-  lucidIO $ wrapPage sess s (game^.title <> " | Hat") $ do
-    h2_ (toHtml (game^.title))
-    when (game^.ended) $ do
+  lucidIO $ wrapPage sess s (game'^.title <> " | Hat") $ do
+    h2_ (toHtml (game'^.title))
+    when (game'^.ended) $ do
       p_ $ strong_ "This game has already ended."
     now <- liftIO getCurrentTime
     ul_ $ do
       li_ $ do "Created by "
                userLink creator
-      when (now < game^.registerUntil && not (game^.begun)) $
+      when (now < game'^.registerUntil && not (game'^.begun)) $
         li_ $ do "Pre-registration ends at "
-                 toHtml (show (game^.registerUntil))
+                 toHtml (show (game'^.registerUntil))
       li_ $ do "Registered players: "
                if null players'
                  then "none"
-                 else sequence_ $ intersperse ", " (map userLink players')
-      let mbUw = game^?wordReq._Just.userWords
+                 else list (map userLink players')
+      let mbUw = game'^?wordReq._Just.submitted
       case mbUw of
         Nothing -> return ()
         Just uw -> li_ $ do
           "Players who haven't submitted words: "
           case filter (\p -> (p^.uid) `M.notMember` uw) players' of
             [] -> "none"
-            xs -> sequence_ $ intersperse ", " (map userLink xs)
+            xs -> list (map userLink xs)
 
     for_ sess $ \u -> do
       -- the game is on, the user has to propose words
-      let wordsNeeded req = case req^.userWords.at u of
+      let wordsNeeded req = case req^.submitted.at u of
             Just ws -> do
               p_ "Your proposed words for the game are:"
               blockquote_ (toHtml (T.unwords (S.toList ws)))
@@ -495,29 +525,29 @@ gamePage gameId = do
                 label_ [Lucid.for_ "words"]
                   "Your proposed words for this game"
                 let plh = T.format "{} space-separated words"
-                            [req^.wordsPerUser]
+                            [req^.perUser]
                 textarea_ [name_ "words", placeholder_ plh] ""
                 input_ [type_ "submit", value_ "Submit"]
       -- the game has ended, the user had to propose words
-      let wordsWereNeeded req = case req^.userWords.at u of
+      let wordsWereNeeded req = case req^.submitted.at u of
             Nothing ->
               p_ "You didn't propose words for this game."
             Just ws -> do
               p_ "Your proposed words for the game were:"
               ul_ $ for_ ws $ \w -> li_ (toHtml w)
 
-      case (S.member u (game^.players), game^.wordReq, game^.ended) of
+      case (S.member u (game'^.players), game'^.wordReq, game'^.ended) of
         (False, _, False) -> do
           errorId <- randomLongUid
           button "Register" [] $
-            JS.addPlayerSelf (JS.selectUid errorId, game^.uid)
+            JS.addPlayerSelf (JS.selectUid errorId, gameId)
           div_ [uid_ errorId, style_ "display:none"] ""
         (False, _, True) ->
           p_ "You didn't participate in this game."
         (_, Nothing, False) -> do
           errorId <- randomLongUid
           button "Unregister" [] $
-            JS.removePlayerSelf (JS.selectUid errorId, game^.uid)
+            JS.removePlayerSelf (JS.selectUid errorId, gameId)
           div_ [uid_ errorId, style_ "display:none"] ""
           p_ ""
           p_ "You don't have to propose words for this game."
@@ -526,7 +556,7 @@ gamePage gameId = do
         (_, Just req, False) -> do
           errorId <- randomLongUid
           button "Unregister" [] $
-            JS.removePlayerSelf (JS.selectUid errorId, game^.uid)
+            JS.removePlayerSelf (JS.selectUid errorId, gameId)
           div_ [uid_ errorId, style_ "display:none"] ""
           p_ ""
           wordsNeeded req
@@ -534,33 +564,95 @@ gamePage gameId = do
 
     when currentAdmin $ do
       h3_ "Admin things"
-      when (isJust (game^.wordReq)) $ do
+      when (isJust (game'^.wordReq)) $ do
         buttonLink "Show submitted words" []
-          (T.format "/game/{}/words/printable" [game^.uid])
+          (T.format "/game/{}/words/printable" [gameId])
         emptySpan "1rem"
-      when (not (game^.begun)) $
+      when (not (game'^.begun)) $
         button "End the preregistration phase" [] $
-          JS.endPreregistration [game^.uid]
+          JS.endPreregistration [gameId]
       p_ ""
-      when (game^.begun) $ do
-        p_ $ do
-          let pls = S.size (game^.players)
-          toHtml $ T.format "There are {} player{}. "
-            (pls, if pls == 1 then "" else "s" :: Text)
-          "How many groups do you want?"
-        numId <- randomLongUid
-        input_ [uid_ numId, type_ "number",
-                value_ (maybe "1" (T.show . length) groups'),
-                style_ "width: 30%; margin-right: 1em;"]
-        button "Generate" [] $
-          JS.generateGroups (game^.uid, JS.selectUid numId)
-        case groups' of
-          Nothing -> return ()
-          Just gs -> ul_ $ do
-            for_ gs $ \g -> li_ $ do
-              toHtml $ T.format "{} player{}: "
-                (length g, if length g == 1 then "" else "s"::Text)
-              sequence_ $ intersperse ", " (map userLink g)
+      when (game'^.begun) $ do
+        -- show past phases
+        ifor_ (game'^.pastPhases) $ \i p -> do
+          h4_ $ toHtml $ T.format "Phase {}" [i+1]
+          let roomCount = length (p^._1.rooms)
+          p_ $ toHtml $ T.format "There {} {} {}."
+                          (plural roomCount "was", roomCount,
+                           plural roomCount "room")
+          -- TODO: links to rooms, etc
+        unless (game'^.ended) $ case game'^.currentPhase of
+          -- if there's a phase in progress, show it
+          Just p -> do
+            let pNum = length (game'^.pastPhases) + 1
+            h4_ $ toHtml $ T.format "Phase #{}" [pNum]
+            p_ $ do
+              "Rooms: "
+              let roomLink i = mkLink (toHtml (T.show i))
+                    (T.format "/game/{}/{}/{}" (gameId, pNum, i))
+              list $ map roomLink [1..length (p^.rooms)]
+          -- if there isn't, choose players to advance to the next phase
+          Nothing -> do
+            p_ $ do
+              let pls = S.size (game'^.players)
+              toHtml $ T.format "There {} {} {}. "
+                (plural pls "is", pls, plural pls "player")
+              "How many groups do you want?"
+            numId <- randomLongUid
+            -- TODO: divide into 5-6-sized groups by default
+            input_ [uid_ numId, type_ "number",
+                    value_ (maybe "1" (T.show . length) groups'),
+                    style_ "width: 30%; margin-right: 1em;"]
+            button "Generate" [] $
+              JS.generateGroups (gameId, JS.selectUid numId)
+            case groups' of
+              Nothing -> return ()
+              Just gs -> do
+                ol_ $ do
+                  for_ gs $ \g -> li_ $ do
+                    toHtml $ T.format "{} {}: "
+                      (length g, plural (length g) "player")
+                    list (map userLink g)
+                button "Begin next phase" [] $
+                  JS.beginNextPhase [gameId]
+
+roomPage
+  :: Uid Game
+  -> Int        -- ^ Phase
+  -> Int        -- ^ Room number
+  -> SpockActionCtx ctx conn Session ServerState ()
+roomPage gameId phaseNum roomNum = do
+  s <- dbQuery GetGlobalState
+  sess <- readSession
+  game' <- dbQuery (GetGame gameId)
+  case getPhase game' phaseNum of
+    Nothing -> do
+      setStatus status404
+      Spock.text "No phase with such number"
+    Just p -> do
+      let phase' = either fst id p
+      case phase'^?rooms.ix (roomNum-1) of
+        Nothing -> do
+          setStatus status404
+          Spock.text "No room with such number"
+        Just room -> do
+          players' <- mapM (dbQuery . GetUser) (room^.players)
+          let pageTitle = T.format "{}: phase #{}, room #{}"
+                                   (game'^.title, phaseNum, roomNum)
+          lucidIO $ wrapPage sess s (pageTitle <> " | Hat") $ do
+            h2_ (toHtml pageTitle)
+            h3_ "Players"
+            ul_ $ for_ players' $ \u ->
+              li_ (toHtml (u^.name))
+
+getPhase :: Game -> Int -> Maybe (Either (Phase, PhaseResults) Phase)
+getPhase g n
+  | 1 <= n && n <= length (g^.pastPhases) =
+      Just (Left (g^?!pastPhases.ix (n-1)))
+  | n == length (g^.pastPhases) + 1 =
+      Right <$> (g^.currentPhase)
+  | otherwise =
+      Nothing
 
 userMethods :: SpockM ctx Session ServerState ()
 userMethods = do
@@ -617,6 +709,9 @@ onClick (JS js) = onclick_ js
 mkLink :: Monad m => HtmlT m a -> Url -> HtmlT m a
 mkLink x src = a_ [href_ src] x
 
+list :: Monad m => [HtmlT m a] -> HtmlT m ()
+list = sequence_ . intersperse ", " . map void
+
 jsonFail :: MonadIO m => Text -> ActionCtxT ctx m a
 jsonFail x = json (False, x)
 
@@ -626,73 +721,6 @@ jsonFormFail field err = json (False, field, err)
 jsonSuccess :: MonadIO m => ActionCtxT ctx m a
 jsonSuccess = json (True, "" :: Text)
 
-data Rating = Rating [(Int, Double)]
-  deriving Eq
-
-instance Show Rating where
-  show (Rating xs) = concatMap (\(a,s) -> printf "%d/%.2f " a s) xs
-
-instance Ord Rating where
-  compare (Rating a) (Rating b) = compare (map fst a) (map fst b)
-                               <> compare (map snd a) (map snd b)
-
-rateSolution
-  :: Int                  -- ^ Player count
-  -> U.Vector (Int, Int)  -- ^ Past games
-  -> U.Vector (Int, Int)  -- ^ Solution
-  -> Rating
-rateSolution pc past future =
-  Rating . sort . map rate . IM.elems $
-  U.ifoldl (\mp turn (a, b) -> mp & ix a %~ (turn:) & ix b %~ (turn:))
-           (IM.fromList (map (, []) [0..pc-1]))
-           (past <> future)
-  where
-    rate ls =
-      let ds = zipWith (-) ls (tail ls)
-      in if null ds
-           then (0, 0)
-           else (minimum ds, fromIntegral (sum ds) / fromIntegral (length ds))
-
--- https://en.wikipedia.org/wiki/Simulated_annealing
-findSchedule
-  :: Int                          -- ^ Player count
-  -> U.Vector (Int, Int)          -- ^ Past games
-  -> Int                          -- ^ Iterations
-  -> IO (U.Vector (Int, Int))     -- ^ Solution
-findSchedule pc past kmax = do
-  future <- fmap U.fromList $ shuffleM $
-    [(x, y) | x <- [0..pc-1], y <- [0..pc-1], x/=y] \\ U.toList past
-  let rfuture = rateSolution pc past future
-  if U.null future then return past
-    else go (future, rfuture) (future, rfuture) kmax
-  where
-    rate :: Rating -> Double
-    rate (Rating xs) =
-      sum (imap (\i (m,s) -> 0.9^^i * fromIntegral (sqr m) * s) xs) *
-      fromIntegral (fst (head xs))
-    p e e' t = let ae = rate e
-                   ae' = rate e'
-               in if ae' > ae then 1 else exp (-(ae - ae')/t)
-    go _       (sbest, _)      0 = return sbest
-    go (s, rs) (sbest, rsbest) k = do
-      s' <- swap2 s
-      let t = 0.99999**(fromIntegral (kmax-k))
-          rs' = rateSolution pc past s'
-      rnd <- randomIO
-      let (sbest', rsbest')
-            | rs' > rsbest = (s', rs')
-            | otherwise    = (sbest, rsbest)
-      if p rs rs' t >= rnd
-        then go (s', rs') (sbest', rsbest') (k-1)
-        else go (s , rs ) (sbest', rsbest') (k-1)
-
-swap2 :: U.Unbox a => U.Vector a -> IO (U.Vector a)
-swap2 xs = do
-  let len = U.length xs
-  i <- randomRIO (0, len-1)
-  j <- randomRIO (0, len-1)
-  return (U.unsafeUpd xs [(i, U.unsafeIndex xs j), (j, U.unsafeIndex xs i)])
-
 calcBreak
   :: Int               -- ^ Number of groups
   -> Int               -- ^ Number of people
@@ -701,50 +729,3 @@ calcBreak x n =
   let (people, extra) = divMod n x
   in  if extra == 0 then [(x, people)]
                     else [(extra, people+1), (x-extra, people)]
-
-sqr :: Num a => a -> a
-sqr a = a*a
-
--- good solutions for group sizes from 2 to 10 (found by running simulated
--- annealing several times, choosing the best solution, and then making some
--- manual changes)
-precomputed :: Map Int (U.Vector (Int, Int))
-precomputed =
-  fmap U.fromList $
-  M.fromList [(2,s2),(3,s3),(4,s4),(5,s5),(6,s6),(7,s7),(8,s8),(9,s9),(10,s10)]
-  where
-    s2  = [(1,0),(0,1)]
-    s3  = [(2,0),(1,2),(0,1),(1,0),(0,2),(2,1)]
-    s4  = [(3,2),(1,0),(0,3),(2,1),(3,0),(0,1),(2,3),(1,2),(2,0),(3,1),(0,2),
-           (1,3)]
-    s5  = [(1,0),(2,3),(4,0),(3,2),(4,1),(3,0),(2,4),(0,1),(4,2),(1,3),(0,2),
-           (4,3),(2,1),(0,4),(3,1),(2,0),(1,4),(0,3),(1,2),(3,4)]
-    s6  = [(1,4),(3,2),(5,0),(4,2),(1,5),(3,0),(2,4),(3,1),(2,0),(3,4),(1,2),
-           (5,3),(0,4),(1,3),(2,5),(4,3),(2,1),(0,3),(5,4),(0,1),(3,5),(4,0),
-           (5,2),(1,0),(4,5),(0,2),(5,1),(2,3),(0,5),(4,1)]
-    s7  = [(1,5),(0,6),(2,3),(4,1),(6,0),(5,2),(1,3),(0,5),(6,4),(5,3),(2,0),
-           (6,5),(3,2),(1,4),(5,6),(0,3),(4,2),(6,1),(3,5),(2,4),(1,0),(3,6),
-           (2,5),(4,0),(3,1),(2,6),(0,4),(2,1),(6,3),(5,4),(0,1),(6,2),(3,4),
-           (1,2),(5,0),(4,6),(5,1),(3,0),(4,5),(1,6),(0,2),(4,3)]
-    s8  = [(6,3),(7,4),(0,5),(2,1),(7,6),(4,3),(1,5),(0,2),(4,6),(1,3),(7,0),
-           (2,6),(3,5),(0,4),(7,1),(6,5),(4,2),(0,3),(1,6),(7,2),(5,0),(3,6),
-           (2,7),(1,0),(4,5),(2,3),(0,6),(4,7),(5,3),(2,0),(6,1),(5,7),(4,0),
-           (3,1),(7,5),(6,2),(3,4),(1,7),(5,6),(2,4),(0,1),(3,7),(5,4),(1,2),
-           (0,7),(6,4),(3,2),(5,1),(6,0),(7,3),(4,1),(2,5),(6,7),(3,0),(1,4),
-           (5,2)]
-    s9  = [(6,4),(8,2),(3,0),(7,1),(8,5),(6,2),(0,1),(7,8),(3,6),(1,5),(8,4),
-           (2,7),(5,0),(6,8),(3,1),(7,5),(4,0),(6,1),(3,2),(0,4),(8,7),(2,1),
-           (4,3),(5,6),(7,2),(1,0),(3,8),(4,6),(2,5),(0,7),(6,3),(1,4),(2,8),
-           (0,5),(7,3),(4,1),(0,8),(6,5),(1,7),(2,4),(5,3),(8,1),(4,2),(6,7),
-           (0,3),(5,8),(1,2),(7,0),(3,4),(1,8),(5,2),(6,0),(3,7),(5,4),(8,6),
-           (2,0),(4,7),(1,3),(2,6),(4,8),(5,7),(0,6),(2,3),(4,5),(7,6),(8,0),
-           (3,5),(1,6),(7,4),(0,2),(8,3),(5,1)]
-    s10 = [(1,5),(9,2),(8,6),(7,0),(2,3),(5,4),(6,1),(2,8),(9,0),(5,3),(1,4),
-           (8,2),(9,6),(3,5),(0,4),(2,1),(7,6),(9,5),(0,3),(7,4),(1,6),(2,5),
-           (7,3),(4,0),(2,6),(1,8),(3,0),(4,5),(6,8),(7,1),(9,3),(5,2),(0,8),
-           (6,4),(9,1),(7,5),(3,8),(4,6),(0,9),(8,1),(5,7),(3,6),(9,8),(2,7),
-           (1,0),(8,5),(4,2),(9,7),(3,1),(0,5),(2,4),(8,9),(1,7),(6,3),(4,9),
-           (5,8),(7,2),(6,0),(1,9),(4,7),(3,2),(5,6),(7,8),(2,0),(1,3),(4,8),
-           (6,7),(5,9),(8,0),(3,7),(1,2),(0,6),(8,4),(2,9),(0,1),(8,3),(9,4),
-           (6,5),(0,7),(3,9),(4,1),(5,0),(6,2),(7,9),(3,4),(5,1),(6,9),(8,7),
-           (0,2),(4,3)]

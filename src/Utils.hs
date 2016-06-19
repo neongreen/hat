@@ -21,6 +21,9 @@ module Utils
   -- * 'Eq'
   equating,
 
+  -- * Text
+  plural,
+
   -- * URLs
   Url,
   makeSlug,
@@ -75,6 +78,12 @@ ordNub = go mempty
 
 equating :: Eq b => (a -> b) -> (a -> a -> Bool)
 equating f = (==) `on` f
+
+plural :: Int -> Text -> Text
+plural 1 x = x
+plural _ "is" = "are"
+plural _ "was" = "were"
+plural _ x = x <> "s"
 
 type Url = Text
 

@@ -48,6 +48,7 @@ allJSFunctions = JS . T.unlines . map fromJS $ [
   addPlayerSelf, removePlayerSelf,
   endPreregistration,
   generateGroups,
+  beginNextPhase,
   makeAdmin ]
 
 -- | A class for things that can be converted to Javascript syntax.
@@ -119,8 +120,6 @@ instance JSParams a => JSFunction (a -> JS) where
 -- 'allJSFunctions'.
 assign :: ToJS x => JS -> x -> JS
 assign v x = JS $ T.format "{} = {};" (v, toJS x)
-
--- TODO: all links here shouldn't be absolute [absolute-links]
 
 replaceWithData :: JSFunction a => a
 replaceWithData =
@@ -363,6 +362,16 @@ generateGroups =
   [text|
     num = parseInt($(numInput)[0].value, 10);
     $.post("/game/" + gameId + "/generate-groups", {num: num})
+     .done(function () {
+        location.reload();
+     });
+  |]
+
+beginNextPhase :: JSFunction a => a
+beginNextPhase =
+  makeJSFunction "beginNextPhase" ["gameId"]
+  [text|
+    $.post("/game/" + gameId + "/begin-next-phase")
      .done(function () {
         location.reload();
      });
