@@ -641,9 +641,14 @@ roomPage gameId phaseNum roomNum = do
                                    (game'^.title, phaseNum, roomNum)
           lucidIO $ wrapPage sess s (pageTitle <> " | Hat") $ do
             h2_ (toHtml pageTitle)
-            h3_ "Players"
-            ul_ $ for_ players' $ \u ->
-              li_ (toHtml (u^.name))
+            table_ $
+              for_ [-1 .. length players' - 1] $ \y -> tr_ $
+                for_ [-1 .. length players' - 1] $ \x -> td_ $
+                  case (x, y) of
+                    (-1, -1) -> "left→top"
+                    (-1,  n) -> toHtml (players' ^?! ix n . name)
+                    ( n, -1) -> toHtml (players' ^?! ix n . name)
+                    ( _,  _) -> toHtml (T.show (x, y))
 
 getPhase :: Game -> Int -> Maybe (Either (Phase, PhaseResults) Phase)
 getPhase g n
