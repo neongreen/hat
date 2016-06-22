@@ -361,9 +361,11 @@ gameMethods = do
             Just ss -> uniform ss
           return Room {
             _roomPlayers = gr,
+            _roomAbsentees = mempty,
             _roomTable = M.fromList [
                 ((a, b), if a==b then RoundImpossible else RoundNotYetPlayed)
                 | a <- gr, b <- gr ],
+            _roomPastGames = [],
             _roomSchedule = ScheduleDone sch }
         let phase' = Phase {
               _phaseRooms = rooms' }
@@ -641,14 +643,39 @@ roomPage gameId phaseNum roomNum = do
                                    (game'^.title, phaseNum, roomNum)
           lucidIO $ wrapPage sess s (pageTitle <> " | Hat") $ do
             h2_ (toHtml pageTitle)
-            table_ $
+            table_ [class_ "roomtable"] $
               for_ [-1 .. length players' - 1] $ \y -> tr_ $
-                for_ [-1 .. length players' - 1] $ \x -> td_ $
+              for_ [-1 .. length players' - 1] $ \x -> do
+                -- x = guesser, y = namer
+                let px = players' !! x
+                    py = players' !! y
+                withP (x /= -1 && px^.uid `elem` room^.absentees ||
+                       y /= -1 && py^.uid `elem` room^.absentees)
+                  [class_ "absent"] $
                   case (x, y) of
-                    (-1, -1) -> "left→top"
-                    (-1,  n) -> toHtml (players' ^?! ix n . name)
-                    ( n, -1) -> toHtml (players' ^?! ix n . name)
-                    ( _,  _) -> toHtml (T.show (x, y))
+                    (-1, -1) -> td_ "left→top"
+                    -- left column: namers
+                    (-1,  _) -> td_ $ toHtml (py^.name)
+                    -- upper row: guessers
+                    ( _, -1) -> td_ $ toHtml (px^.name)
+                    ( _,  _) -> case room^?!table.ix (py^.uid, px^.uid) of
+                      RoundNotYetPlayed ->
+                        td_ ""
+                      RoundPlayed sc _ _ ->
+                        td_ [class_ "played"] $ toHtml (T.show sc)
+                      RoundImpossible ->
+                        td_ [class_ "impossible"] ""
+
+{- TODO:
+
+* mark/unmark absentees
+* show penalties for namers/guessers
+* show next players
+* show running totals for players
+* timer
+* better style for the table
+* ability to add people to a phase even if they weren't present in the previous phase
+-}
 
 getPhase :: Game -> Int -> Maybe (Either (Phase, PhaseResults) Phase)
 getPhase g n
@@ -734,3 +761,7 @@ calcBreak x n =
   let (people, extra) = divMod n x
   in  if extra == 0 then [(x, people)]
                     else [(extra, people+1), (x-extra, people)]
+
+withP :: With a => Bool -> [Attribute] -> a -> a
+withP False _  x = x
+withP True  as x = with x as

@@ -47,7 +47,9 @@ module DB
     guesserPenalty,
   ScheduleStatus(..),
   Room(..),
+    absentees,
     table,
+    pastGames,
     schedule,
   GlobalState(..),
     games,
@@ -164,7 +166,10 @@ data PhaseResults = Results {
 
 data Room = Room {
   _roomPlayers :: [Uid User],
+  _roomAbsentees :: Set (Uid User),
+  -- namer, guesser
   _roomTable :: Map (Uid User, Uid User) Round,
+  _roomPastGames :: [(Uid User, Uid User)],
   _roomSchedule :: ScheduleStatus }
   deriving (Show)
 
