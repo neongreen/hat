@@ -656,10 +656,10 @@ roomPage gameId phaseNum roomNum = do
                     (-1, -1) -> td_ [class_ "header-corner"] ""
                     -- left column: namers
                     (-1,  _) -> td_ [class_ "header-left"] $
-                                toHtml (py^.name)
+                                userLink py
                     -- upper row: guessers
                     ( _, -1) -> td_ [class_ "header-top"] $
-                                toHtml (px^.name)
+                                userLink px
                     ( _,  _) -> case room^?!table.ix (py^.uid, px^.uid) of
                       RoundNotYetPlayed ->
                         td_ ""
