@@ -5,6 +5,7 @@ QuasiQuotes,
 TypeFamilies,
 TupleSections,
 FlexibleContexts,
+ScopedTypeVariables,
 NoImplicitPrelude
   #-}
 
@@ -627,49 +628,55 @@ roomPage gameId phaseNum roomNum = do
   s <- dbQuery GetGlobalState
   sess <- readSession
   game' <- dbQuery (GetGame gameId)
-  case getPhase game' phaseNum of
+  p :: Either (Phase, PhaseResults) Phase <-
+    case getPhase game' phaseNum of
     Nothing -> do
       setStatus status404
       Spock.text "No phase with such number"
-    Just p -> do
-      let phase' = either fst id p
-      case phase'^?rooms.ix (roomNum-1) of
-        Nothing -> do
-          setStatus status404
-          Spock.text "No room with such number"
-        Just room -> do
-          players' <- mapM (dbQuery . GetUser) (room^.players)
-          let pageTitle = T.format "{}: phase #{}, room #{}"
-                                   (game'^.title, phaseNum, roomNum)
-          lucidIO $ wrapPage sess s (pageTitle <> " | Hat") $ do
-            h2_ (toHtml pageTitle)
-            table_ [class_ "roomtable"] $
-              for_ [-1 .. length players' - 1] $ \y -> tr_ $
-              for_ [-1 .. length players' - 1] $ \x -> do
-                -- x = guesser, y = namer
-                let px = players' !! x
-                    py = players' !! y
-                withP (x /= -1 && px^.uid `elem` room^.absentees ||
-                       y /= -1 && py^.uid `elem` room^.absentees)
-                  [class_ "absent"] $
-                  case (x, y) of
-                    (-1, -1) -> td_ [class_ "header-corner"] ""
-                    -- left column: namers
-                    (-1,  _) -> td_ [class_ "header-left"] $
-                                userLink py
-                    -- upper row: guessers
-                    ( _, -1) -> td_ [class_ "header-top"] $
-                                userLink px
-                    ( _,  _) -> case room^?!table.ix (py^.uid, px^.uid) of
-                      RoundNotYetPlayed ->
-                        td_ ""
-                      RoundPlayed sc _ _ ->
-                        td_ [class_ "played"] $ toHtml (T.show sc)
-                      RoundImpossible ->
-                        td_ [class_ "impossible"] ""
+    Just p -> return p
+
+  -- if the phase is correct, continue
+  let phase' = either fst id p
+  room <- case phase'^?rooms.ix (roomNum-1) of
+    Nothing -> do
+      setStatus status404
+      Spock.text "No room with such number"
+    Just room -> return room
+
+  -- if the room was found, continue
+  players' <- mapM (dbQuery . GetUser) (room^.players)
+  let pageTitle = T.format "{}: phase #{}, room #{}"
+                           (game'^.title, phaseNum, roomNum)
+  lucidIO $ wrapPage sess s (pageTitle <> " | Hat") $ do
+    h2_ (toHtml pageTitle)
+    table_ [class_ "roomtable"] $
+      for_ [-1 .. length players' - 1] $ \y -> tr_ $
+      for_ [-1 .. length players' - 1] $ \x -> do
+        -- x = guesser, y = namer
+        let px = players' !! x
+            py = players' !! y
+        withP (x /= -1 && px^.uid `elem` room^.absentees ||
+               y /= -1 && py^.uid `elem` room^.absentees)
+          [class_ "absent"] $
+          case (x, y) of
+            (-1, -1) -> td_ [class_ "header-corner"] ""
+            -- left column: namers
+            (-1,  _) -> td_ [class_ "header-left"] $
+                        userLink py
+            -- upper row: guessers
+            ( _, -1) -> td_ [class_ "header-top"] $
+                        userLink px
+            ( _,  _) -> case room^?!table.ix (py^.uid, px^.uid) of
+              RoundNotYetPlayed ->
+                td_ ""
+              RoundPlayed sc _ _ ->
+                td_ [class_ "played"] $ toHtml (T.show sc)
+              RoundImpossible ->
+                td_ [class_ "impossible"] ""
 
 {- TODO:
 
+* actually entering/editing people's scores
 * add “left person names, top person guesses”, or something like “X explains a word to Y” at the bottom, or even a log:
   — X explains to Y
   — A explains to B
