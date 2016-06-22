@@ -653,11 +653,13 @@ roomPage gameId phaseNum roomNum = do
                        y /= -1 && py^.uid `elem` room^.absentees)
                   [class_ "absent"] $
                   case (x, y) of
-                    (-1, -1) -> td_ "left→top"
+                    (-1, -1) -> td_ [class_ "header-corner"] ""
                     -- left column: namers
-                    (-1,  _) -> td_ $ toHtml (py^.name)
+                    (-1,  _) -> td_ [class_ "header-left"] $
+                                toHtml (py^.name)
                     -- upper row: guessers
-                    ( _, -1) -> td_ $ toHtml (px^.name)
+                    ( _, -1) -> td_ [class_ "header-top"] $
+                                toHtml (px^.name)
                     ( _,  _) -> case room^?!table.ix (py^.uid, px^.uid) of
                       RoundNotYetPlayed ->
                         td_ ""
@@ -668,6 +670,10 @@ roomPage gameId phaseNum roomNum = do
 
 {- TODO:
 
+* add “left person names, top person guesses”, or something like “X explains a word to Y” at the bottom, or even a log:
+  — X explains to Y
+  — A explains to B
+  — “game over” / “and 40 more turns”
 * mark/unmark absentees
 * show penalties for namers/guessers
 * show next players

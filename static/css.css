@@ -81,14 +81,46 @@ textarea.fullwidth {
   display:none;
 }
 
-.impossible {
-  background-color: gray;
+.roomtable {
+  margin-left: auto;
+  margin-right: auto;
+  table-layout: fixed;
+  width: inherit;
 }
 
-.played {
+.roomtable td {
+  width: 60px;
+  height: 60px;
+  padding: 10px;
+  border-bottom: .1rem solid #e1e1e1;
+  border-right:  .1rem solid #e1e1e1;
+}
+
+.roomtable .header-left {
+  border-right: solid 2px;
+  padding-right: 12px;
+  text-align: right;
+}
+
+.roomtable .header-top {
+  border-bottom: solid 2px;
+  text-align: center;
+}
+
+.roomtable .header-corner {
+  border-bottom: solid 2px;
+  border-right:  solid 2px;
+}
+
+.roomtable .impossible {
+  background-color: gray;
+  border-color: gray;
+}
+
+.roomtable .played {
   background-color: lightgray;
 }
 
-.absent {
+.roomtable .absent {
   opacity: 0.5;
 }
