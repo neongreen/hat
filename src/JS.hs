@@ -45,6 +45,7 @@ allJSFunctions = JS . T.unlines . map fromJS $ [
   logout,
   -- Other
   submitWords,
+  showRoundEditPopup,
   addPlayerSelf, removePlayerSelf,
   endPreregistration,
   generateGroups,
@@ -304,6 +305,77 @@ submitWords =
         else
           showFormError(form, data[1], data[2]);
      });
+  |]
+
+showRoundEditPopup :: JSFunction a => a
+showRoundEditPopup =
+  makeJSFunction "showRoundEditPopup"
+                 ["gameId", "phaseId", "roomId", "namerId", "guesserId",
+                  "score", "namerPenalty", "guesserPenalty"]
+  [text|
+    dialog = $("<div>", {
+      "class" : "round-edit-popup"
+    })[0];
+
+    form = $("<form>")[0];
+
+    labelScore = $("<label>", {
+      "for"  : "score",
+      "text" : "Score" })[0];
+    inputScore = $("<input>", {
+      "name"  : "score",
+      "type"  : "number",
+      "value" : score.toString() })[0];
+
+    penalties = $("<div>", {
+      "name" : "penalties" })[0];
+
+    penalty1 = $("<div>")[0];
+    labelNamerPenalty = $("<label>", {
+      "for"  : "namer-penalty",
+      "text" : "Namer penalty" })[0];
+    inputNamerPenalty = $("<input>", {
+      "name"  : "namer-penalty",
+      "type"  : "number",
+      "value" : namerPenalty.toString() })[0];
+    $(penalty1).append(labelNamerPenalty, inputNamerPenalty);
+
+    penalty2 = $("<div>")[0];
+    labelGuesserPenalty = $("<label>", {
+      "for"  : "guesser-penalty",
+      "text" : "Guesser penalty" })[0];
+    inputGuesserPenalty = $("<input>", {
+      "name"  : "guesser-penalty",
+      "type"  : "number",
+      "value" : guesserPenalty.toString() })[0];
+    $(penalty2).append(labelGuesserPenalty, inputGuesserPenalty);
+
+    $(penalties).append(penalty1, penalty2);
+
+    saveButton = $("<button>", {
+      "type"  : "submit",
+      "text"  : "Save" })[0];
+
+    clearButton = $("<button>", {
+      "style" : "margin-left: 0.5rem",
+      "text"  : "Clear round" })[0];
+
+    cancelButton = $("<button>", {
+      "style" : "margin-left: 0.5rem; float: right;",
+      "class" : "button-outline",
+      "text"  : "Cancel" })[0];
+
+    $(form).append(labelScore, inputScore,
+                   penalties,
+                   saveButton, clearButton, cancelButton);
+    $(dialog).append(form);
+
+    $.magnificPopup.open({
+      modal: true,
+      items: {
+        src: dialog,
+        type: 'inline' }
+    });
   |]
 
 makeAdmin :: JSFunction a => a

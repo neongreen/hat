@@ -275,6 +275,8 @@ wrapPage sess gs pageTitle page = doctypehtml_ $ do
     onPageLoad (JS "autosize($('textarea'));")
     includeCSS "/normalize.css"
     includeCSS "/milligram.css"
+    includeJS  "/magnific-popup.js"
+    includeCSS "/magnific-popup.css"
     includeCSS "/css.css"
     includeCSS "/loader.css"
     -- Include definitions of all Javascript functions that we have defined
@@ -693,8 +695,11 @@ roomPage gameId phaseNum roomNum = do
 
 {- TODO:
 
-* somehow deal with longer table names
-* actually entering/editing people's scores
+* widget to save score, penalty, etc of current player and move on to the next player
+* somehow deal with long player names in tables
+* actually entering/editing people's scores (and a button to erase round)
+* add instructions for editing
+* highlight cells on hover and change pointer
 * add “left person names, top person guesses”, or something like “X explains a word to Y” at the bottom, or even a log:
   — X explains to Y
   — A explains to B
