@@ -628,15 +628,14 @@ roomPage gameId phaseNum roomNum = do
   s <- dbQuery GetGlobalState
   sess <- readSession
   game' <- dbQuery (GetGame gameId)
-  p :: Either (Phase, PhaseResults) Phase <-
-    case getPhase game' phaseNum of
+  phase' <- case getPhase game' phaseNum of
     Nothing -> do
       setStatus status404
       Spock.text "No phase with such number"
-    Just p -> return p
+    Just (Left (p, _)) -> return p
+    Just (Right p)     -> return p
 
   -- if the phase is correct, continue
-  let phase' = either fst id p
   room <- case phase'^?rooms.ix (roomNum-1) of
     Nothing -> do
       setStatus status404
@@ -649,42 +648,59 @@ roomPage gameId phaseNum roomNum = do
                            (game'^.title, phaseNum, roomNum)
   lucidIO $ wrapPage sess s (pageTitle <> " | Hat") $ do
     h2_ (toHtml pageTitle)
-    table_ [class_ "roomtable"] $
+    table_ [class_ "roomtable"] $ do
       for_ [-1 .. length players' - 1] $ \y -> tr_ $
-      for_ [-1 .. length players' - 1] $ \x -> do
-        -- x = guesser, y = namer
-        let px = players' !! x
-            py = players' !! y
-        withP (x /= -1 && px^.uid `elem` room^.absentees ||
-               y /= -1 && py^.uid `elem` room^.absentees)
-          [class_ "absent"] $
-          case (x, y) of
-            (-1, -1) -> td_ [class_ "header-corner"] ""
-            -- left column: namers
-            (-1,  _) -> td_ [class_ "header-left"] $
-                        userLink py
-            -- upper row: guessers
-            ( _, -1) -> td_ [class_ "header-top"] $
-                        userLink px
-            ( _,  _) -> case room^?!table.ix (py^.uid, px^.uid) of
-              RoundNotYetPlayed ->
-                td_ ""
-              RoundPlayed sc _ _ ->
-                td_ [class_ "played"] $ toHtml (T.show sc)
-              RoundImpossible ->
-                td_ [class_ "impossible"] ""
+        for_ [-1 .. length players' - 1] $ \x -> do
+          -- x = guesser, y = namer
+          let px = players' !! x
+              py = players' !! y
+          withP (x /= -1 && px^.uid `elem` room^.absentees ||
+                 y /= -1 && py^.uid `elem` room^.absentees)
+            [class_ "absent"] $
+            case (x, y) of
+              (-1, -1) -> td_ [class_ "header-corner"] ""
+              -- left column: namers
+              (-1,  _) -> td_ [class_ "header-left"] $
+                          userLink py
+              -- upper row: guessers
+              ( _, -1) -> td_ [class_ "header-top"] $
+                          userLink px
+              ( _,  _) -> case room^?!table.ix (py^.uid, px^.uid) of
+                RoundNotYetPlayed ->
+                  td_ ""
+                RoundPlayed sc _ _ ->
+                  td_ [class_ "played"] $ toHtml (T.show sc)
+                RoundImpossible ->
+                  td_ [class_ "impossible"] ""
+      -- totals
+      tr_ [class_ "penalties"] $ do
+        td_ "Penalty"
+        for_ players' $ \p -> do
+          let penalty = sum . catMaybes $ do
+                ((a, b), r) <- M.toList (room^.table)
+                [if a == p^.uid then r^?namerPenalty else Nothing,
+                 if b == p^.uid then r^?guesserPenalty else Nothing]
+          td_ $ when (penalty /= 0) $ toHtml (T.show penalty)
+      tr_ [class_ "totals"] $ do
+        td_ "Total"
+        for_ players' $ \p -> do
+          let total = sum . catMaybes $ do
+                ((a, b), r) <- M.toList (room^.table)
+                [if a == p^.uid then negate <$> r^?namerPenalty else Nothing,
+                 if b == p^.uid then negate <$> r^?guesserPenalty else Nothing,
+                 r^?score]
+          td_ $ toHtml (T.show total)
 
 {- TODO:
 
+* somehow deal with longer table names
 * actually entering/editing people's scores
 * add “left person names, top person guesses”, or something like “X explains a word to Y” at the bottom, or even a log:
   — X explains to Y
   — A explains to B
   — “game over” / “and 40 more turns”
 * mark/unmark absentees
-* show penalties for namers/guessers
-* show next players
-* show running totals for players
+* show penalties for namers/guessers in cells themselves
 * timer
 * better style for the table
 * ability to add people to a phase even if they weren't present in the previous phase
