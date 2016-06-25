@@ -667,13 +667,21 @@ roomPage gameId phaseNum roomNum = do
               -- upper row: guessers
               ( _, -1) -> td_ [class_ "header-top"] $
                           userLink px
-              ( _,  _) -> case room^?!table.ix (py^.uid, px^.uid) of
-                RoundNotYetPlayed ->
-                  td_ ""
-                RoundPlayed sc _ _ ->
-                  td_ [class_ "played"] $ toHtml (T.show sc)
-                RoundImpossible ->
-                  td_ [class_ "impossible"] ""
+              ( _,  _) -> do
+                let roundRes = room^?!table.ix (py^.uid, px^.uid)
+                let handler = JS.showRoundEditPopup
+                                (gameId, phaseNum, roomNum,
+                                 py^.uid, px^.uid,
+                                 fromMaybe 0 (roundRes^?score),
+                                 fromMaybe 0 (roundRes^?namerPenalty),
+                                 fromMaybe 0 (roundRes^?guesserPenalty))
+                case roundRes of
+                  RoundNotYetPlayed ->
+                    td_ [onClick handler, class_ "not-yet-played"] ""
+                  RoundPlayed sc _ _ ->
+                    td_ [onClick handler, class_ "played"] $ toHtml (T.show sc)
+                  RoundImpossible ->
+                    td_ [class_ "impossible"] ""
       -- totals
       tr_ [class_ "penalties"] $ do
         td_ "Penalty"

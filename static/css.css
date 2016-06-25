@@ -119,6 +119,15 @@ textarea.fullwidth {
   border-color: gray;
 }
 
+.roomtable .played,
+.roomtable .not-yet-played {
+  cursor: pointer;
+}
+.roomtable .played:hover,
+.roomtable .not-yet-played:hover {
+  background-color: #FF9;
+}
+
 .roomtable .played {
   background-color: lightgray;
 }
