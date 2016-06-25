@@ -87,6 +87,10 @@ instance (ToJS a,ToJS b,ToJS c,ToJS d,ToJS e) => JSParams (a,b,c,d,e) where
   jsParams (a,b,c,d,e) = [toJS a, toJS b, toJS c, toJS d, toJS e]
 instance (ToJS a,ToJS b,ToJS c,ToJS d,ToJS e,ToJS f) => JSParams (a,b,c,d,e,f) where
   jsParams (a,b,c,d,e,f) = [toJS a, toJS b, toJS c, toJS d, toJS e, toJS f]
+instance (ToJS a,ToJS b,ToJS c,ToJS d,ToJS e,ToJS f,ToJS g) => JSParams (a,b,c,d,e,f,g) where
+  jsParams (a,b,c,d,e,f,g) = [toJS a, toJS b, toJS c, toJS d, toJS e, toJS f, toJS g]
+instance (ToJS a,ToJS b,ToJS c,ToJS d,ToJS e,ToJS f,ToJS g,ToJS h) => JSParams (a,b,c,d,e,f,g,h) where
+  jsParams (a,b,c,d,e,f,g,h) = [toJS a, toJS b, toJS c, toJS d, toJS e, toJS f, toJS g, toJS h]
 
 {- | This hacky class lets you construct and use Javascript functions; you give 'makeJSFunction' function name, function parameters, and function body, and you get a polymorphic value of type @JSFunction a => a@, which you can use either as a complete function definition (if you set @a@ to be @JS@), or as a function that you can give some parameters and it would return a Javascript call:
 
@@ -310,7 +314,7 @@ submitWords =
 showRoundEditPopup :: JSFunction a => a
 showRoundEditPopup =
   makeJSFunction "showRoundEditPopup"
-                 ["gameId", "phaseId", "roomId", "namerId", "guesserId",
+                 ["gameId", "phaseNum", "roomNum", "namerId", "guesserId",
                   "score", "namerPenalty", "guesserPenalty"]
   [text|
     dialog = $("<div>", {
@@ -318,6 +322,15 @@ showRoundEditPopup =
     })[0];
 
     form = $("<form>")[0];
+    $(form).submit(function(event) {
+      event.preventDefault();
+      $.post("/game/" + gameId + "/" + phaseNum + "/" + roomNum +
+             "/round/" + namerId + "/" + guesserId + "/set",
+             $(form).serialize())
+       .done(function() {
+          location.reload();
+        });
+    });
 
     labelScore = $("<label>", {
       "for"  : "score",
@@ -357,13 +370,17 @@ showRoundEditPopup =
       "text"  : "Save" })[0];
 
     clearButton = $("<button>", {
+      "type"  : "button",
       "style" : "margin-left: 0.5rem",
       "text"  : "Clear round" })[0];
 
     cancelButton = $("<button>", {
+      "type"  : "button",
       "style" : "margin-left: 0.5rem; float: right;",
       "class" : "button-outline",
       "text"  : "Cancel" })[0];
+    $(cancelButton).click(function() {
+      $.magnificPopup.close(); });
 
     $(form).append(labelScore, inputScore,
                    penalties,

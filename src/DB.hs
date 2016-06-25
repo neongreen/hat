@@ -82,6 +82,7 @@ module DB
   SetGameBegun(..),
   SetGameGroups(..),
   SetGameCurrentPhase(..),
+  SetRoundResults(..),
   SetWords(..),
   SetDirty(..), UnsetDirty(..),
 )
@@ -343,6 +344,28 @@ setGameGroups gameId val = gameById gameId . groups .= val
 setGameCurrentPhase :: Uid Game -> Phase -> Acid.Update GlobalState ()
 setGameCurrentPhase gameId val = gameById gameId . currentPhase .= Just val
 
+setRoundResults
+  :: Uid Game
+  -> Int                    -- ^ Phase
+  -> Int                    -- ^ Room
+  -> (Uid User, Uid User)   -- ^ Namer, guesser
+  -> Round                  -- ^ Round
+  -> Acid.Update GlobalState ()
+setRoundResults gameId phaseNum roomNum pls roundRes = do
+  game' <- use (gameById gameId)
+  let phaseLens
+        | 1 <= phaseNum && phaseNum <= length (game'^.pastPhases) =
+            pastPhases . ix (phaseNum-1) . _1
+        | phaseNum == length (game'^.pastPhases) + 1 =
+            currentPhase . _Just
+        | otherwise =
+            const pure    -- a traversal that doesn't traverse anything
+  gameById gameId
+    . phaseLens
+    . rooms . ix (roomNum-1)
+    . table . at pls
+    .= Just roundRes
+
 setWords :: Uid Game -> Uid User -> [Text] -> Acid.Update GlobalState ()
 setWords gameId userId ws =
   gameById gameId.wordReq._Just.submitted.at userId .= Just (S.fromList ws)
@@ -366,6 +389,7 @@ makeAcidic ''GlobalState [
   'setGameBegun,
   'setGameGroups,
   'setGameCurrentPhase,
+  'setRoundResults,
   'setWords,
   'setDirty, 'unsetDirty
   ]

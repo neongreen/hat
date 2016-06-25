@@ -6,6 +6,7 @@ TypeFamilies,
 TupleSections,
 FlexibleContexts,
 ScopedTypeVariables,
+MultiWayIf,
 NoImplicitPrelude
   #-}
 
@@ -92,6 +93,12 @@ createCheckpoint' db = liftIO $ do
 
 gameVar :: Path '[Uid Game]
 gameVar = "game" <//> var
+
+gamePhaseRoomVars :: Path '[Uid Game, Int, Int]
+gamePhaseRoomVars = gameVar <//> var <//> var
+
+roundVars :: Path '[Uid User, Uid User]
+roundVars = "round" <//> var <//> var
 
 main :: IO ()
 main = do
@@ -482,6 +489,25 @@ gameMethods = do
     dbUpdate (SetWords gameId u ws)
     jsonSuccess
 
+  Spock.post (gamePhaseRoomVars <//> roundVars <//> "set") $
+    \gameId phaseNum roomNum namerId guesserId -> do
+    score'          <- param' "score"
+    namerPenalty'   <- param' "namer-penalty"
+    guesserPenalty' <- param' "guesser-penalty"
+    (_, _, _, room) <-
+      getGamePhaseRoom gameId phaseNum roomNum
+    let res = RoundPlayed {
+          _roundScore = score',
+          _roundNamerPenalty = namerPenalty',
+          _roundGuesserPenalty = guesserPenalty' }
+    when (namerId == guesserId) $
+      fail "a player can't play with themself"
+    when (namerId `notElem` room^.players) $
+      fail "the namer isn't playing in this room"
+    when (guesserId `notElem` room^.players) $
+      fail "the guesser isn't playing in this room"
+    dbUpdate (SetRoundResults gameId phaseNum roomNum (namerId, guesserId) res)
+
 gamePage
   :: Uid Game
   -> SpockActionCtx ctx conn Session ServerState ()
@@ -629,22 +655,7 @@ roomPage
 roomPage gameId phaseNum roomNum = do
   s <- dbQuery GetGlobalState
   sess <- readSession
-  game' <- dbQuery (GetGame gameId)
-  phase' <- case getPhase game' phaseNum of
-    Nothing -> do
-      setStatus status404
-      Spock.text "No phase with such number"
-    Just (Left (p, _)) -> return p
-    Just (Right p)     -> return p
-
-  -- if the phase is correct, continue
-  room <- case phase'^?rooms.ix (roomNum-1) of
-    Nothing -> do
-      setStatus status404
-      Spock.text "No room with such number"
-    Just room -> return room
-
-  -- if the room was found, continue
+  (game', _, _, room) <- getGamePhaseRoom gameId phaseNum roomNum
   players' <- mapM (dbQuery . GetUser) (room^.players)
   let pageTitle = T.format "{}: phase #{}, room #{}"
                            (game'^.title, phaseNum, roomNum)
@@ -719,14 +730,32 @@ roomPage gameId phaseNum roomNum = do
 * ability to add people to a phase even if they weren't present in the previous phase
 -}
 
-getPhase :: Game -> Int -> Maybe (Either (Phase, PhaseResults) Phase)
-getPhase g n
-  | 1 <= n && n <= length (g^.pastPhases) =
-      Just (Left (g^?!pastPhases.ix (n-1)))
-  | n == length (g^.pastPhases) + 1 =
-      Right <$> (g^.currentPhase)
-  | otherwise =
-      Nothing
+getGamePhaseRoom
+  :: (MonadIO m, HasSpock (ActionCtxT ctx m),
+      SpockState (ActionCtxT ctx m) ~ ServerState)
+  => Uid Game -> Int -> Int
+  -> ActionCtxT ctx m (Game, Phase, Maybe PhaseResults, Room)
+getGamePhaseRoom gameId phaseNum roomNum = do
+  game' <- dbQuery (GetGame gameId)
+  let mbPhase
+        | 1 <= phaseNum && phaseNum <= length (game'^.pastPhases) =
+            Just (Left (game'^?!pastPhases.ix (phaseNum-1)))
+        | phaseNum == length (game'^.pastPhases) + 1 =
+            Right <$> (game'^.currentPhase)
+        | otherwise =
+            Nothing
+  (phase', mbRes) <- case mbPhase of
+    Nothing -> do
+      setStatus status404
+      Spock.text "No phase with such number"
+    Just (Left (p, res)) -> return (p, Just res)
+    Just (Right p)       -> return (p, Nothing)
+  room <- case phase'^?rooms.ix (roomNum-1) of
+    Nothing -> do
+      setStatus status404
+      Spock.text "No room with such number"
+    Just room -> return room
+  return (game', phase', mbRes, room)
 
 userMethods :: SpockM ctx Session ServerState ()
 userMethods = do
