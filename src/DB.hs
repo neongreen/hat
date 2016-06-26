@@ -45,6 +45,7 @@ module DB
     score,
     namerPenalty,
     guesserPenalty,
+    discards,
   ScheduleStatus(..),
   Room(..),
     absentees,
@@ -148,7 +149,8 @@ data Round
   | RoundPlayed {
       _roundScore          :: Int,
       _roundNamerPenalty   :: Int,
-      _roundGuesserPenalty :: Int }
+      _roundGuesserPenalty :: Int,
+      _roundDiscards       :: Int }
   | RoundImpossible            -- e.g. the user can't play against themself
   deriving (Show)
 

@@ -91,6 +91,8 @@ instance (ToJS a,ToJS b,ToJS c,ToJS d,ToJS e,ToJS f,ToJS g) => JSParams (a,b,c,d
   jsParams (a,b,c,d,e,f,g) = [toJS a, toJS b, toJS c, toJS d, toJS e, toJS f, toJS g]
 instance (ToJS a,ToJS b,ToJS c,ToJS d,ToJS e,ToJS f,ToJS g,ToJS h) => JSParams (a,b,c,d,e,f,g,h) where
   jsParams (a,b,c,d,e,f,g,h) = [toJS a, toJS b, toJS c, toJS d, toJS e, toJS f, toJS g, toJS h]
+instance (ToJS a,ToJS b,ToJS c,ToJS d,ToJS e,ToJS f,ToJS g,ToJS h,ToJS i) => JSParams (a,b,c,d,e,f,g,h,i) where
+  jsParams (a,b,c,d,e,f,g,h,i) = [toJS a, toJS b, toJS c, toJS d, toJS e, toJS f, toJS g, toJS h, toJS i]
 
 {- | This hacky class lets you construct and use Javascript functions; you give 'makeJSFunction' function name, function parameters, and function body, and you get a polymorphic value of type @JSFunction a => a@, which you can use either as a complete function definition (if you set @a@ to be @JS@), or as a function that you can give some parameters and it would return a Javascript call:
 
@@ -315,7 +317,7 @@ showRoundEditPopup :: JSFunction a => a
 showRoundEditPopup =
   makeJSFunction "showRoundEditPopup"
                  ["gameId", "phaseNum", "roomNum", "namerId", "guesserId",
-                  "score", "namerPenalty", "guesserPenalty"]
+                  "score", "namerPenalty", "guesserPenalty", "discards"]
   [text|
     dialog = $("<div>", {
       "class" : "round-edit-popup"
@@ -345,6 +347,17 @@ showRoundEditPopup =
       "name" : "penalties" })[0];
 
     penalty1 = $("<div>")[0];
+    labelDiscards = $("<label>", {
+      "for"  : "discards",
+      "text" : "Discards" })[0];
+    inputDiscards = $("<input>", {
+      "name"  : "discards",
+      "type"  : "number",
+      "min"   : "0",
+      "value" : discards })[0];
+    $(penalty1).append(labelDiscards, inputDiscards);
+
+    penalty2 = $("<div>")[0];
     labelNamerPenalty = $("<label>", {
       "for"  : "namer-penalty",
       "text" : "Namer penalty" })[0];
@@ -353,9 +366,9 @@ showRoundEditPopup =
       "type"  : "number",
       "min"   : "0",
       "value" : namerPenalty })[0];
-    $(penalty1).append(labelNamerPenalty, inputNamerPenalty);
+    $(penalty2).append(labelNamerPenalty, inputNamerPenalty);
 
-    penalty2 = $("<div>")[0];
+    penalty3 = $("<div>")[0];
     labelGuesserPenalty = $("<label>", {
       "for"  : "guesser-penalty",
       "text" : "Guesser penalty" })[0];
@@ -364,9 +377,9 @@ showRoundEditPopup =
       "type"  : "number",
       "min"   : "0",
       "value" : guesserPenalty })[0];
-    $(penalty2).append(labelGuesserPenalty, inputGuesserPenalty);
+    $(penalty3).append(labelGuesserPenalty, inputGuesserPenalty);
 
-    $(penalties).append(penalty1, penalty2);
+    $(penalties).append(penalty1, penalty2, penalty3);
 
     saveButton = $("<button>", {
       "type"  : "submit",
@@ -392,7 +405,7 @@ showRoundEditPopup =
     $(cancelButton).click(function() {
       $.magnificPopup.close(); });
 
-    $([inputScore, inputNamerPenalty, inputGuesserPenalty])
+    $([inputScore, inputDiscards, inputNamerPenalty, inputGuesserPenalty])
       .focus(function() {this.select();});
 
     $(form).append(labelScore, inputScore,

@@ -494,12 +494,14 @@ gameMethods = do
     score'          <- param' "score"
     namerPenalty'   <- abs <$> param' "namer-penalty"
     guesserPenalty' <- abs <$> param' "guesser-penalty"
+    discards'       <- abs <$> param' "discards"
     (_, _, _, room) <-
       getGamePhaseRoom gameId phaseNum roomNum
     let res = RoundPlayed {
           _roundScore = score',
           _roundNamerPenalty = namerPenalty',
-          _roundGuesserPenalty = guesserPenalty' }
+          _roundGuesserPenalty = guesserPenalty',
+          _roundDiscards = discards' }
     when (namerId == guesserId) $
       fail "a player can't play with themself"
     when (namerId `notElem` room^.players) $
@@ -698,11 +700,12 @@ roomPage gameId phaseNum roomNum = do
                                  py^.uid, px^.uid,
                                  fromMaybe 0 (roundRes^?score),
                                  fromMaybe 0 (roundRes^?namerPenalty),
-                                 fromMaybe 0 (roundRes^?guesserPenalty))
+                                 fromMaybe 0 (roundRes^?guesserPenalty),
+                                 fromMaybe 0 (roundRes^?discards))
                 case roundRes of
                   RoundNotYetPlayed ->
                     td_ [onClick handler, class_ "not-yet-played"] ""
-                  RoundPlayed sc _ _ ->
+                  RoundPlayed sc _ _ _ ->
                     td_ [onClick handler, class_ "played"] $ toHtml (T.show sc)
                   RoundImpossible ->
                     td_ [class_ "impossible"] ""
@@ -712,7 +715,8 @@ roomPage gameId phaseNum roomNum = do
         for_ players' $ \p -> do
           let penalty = sum . catMaybes $ do
                 ((a, b), r) <- M.toList (room^.table)
-                [if a == p^.uid then r^?namerPenalty else Nothing,
+                [if a == p^.uid then r^?discards       else Nothing,
+                 if a == p^.uid then r^?namerPenalty   else Nothing,
                  if b == p^.uid then r^?guesserPenalty else Nothing]
           td_ $ when (penalty /= 0) $ toHtml ("−" <> T.show penalty)
       tr_ [class_ "totals"] $ do
@@ -720,9 +724,10 @@ roomPage gameId phaseNum roomNum = do
         for_ players' $ \p -> do
           let total = sum . catMaybes $ do
                 ((a, b), r) <- M.toList (room^.table)
-                [if a == p^.uid then negate <$> r^?namerPenalty else Nothing,
+                [if a == p^.uid then negate <$> r^?discards       else Nothing,
+                 if a == p^.uid then negate <$> r^?namerPenalty   else Nothing,
                  if b == p^.uid then negate <$> r^?guesserPenalty else Nothing,
-                 if a == p^.uid || b == p^.uid then r^?score else Nothing]
+                 if a == p^.uid || b == p^.uid then r^?score      else Nothing]
           td_ $ toHtml (T.show total)
 
 getGamePhaseRoom
