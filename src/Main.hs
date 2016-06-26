@@ -742,15 +742,23 @@ roomPage gameId phaseNum roomNum = do
       totalsRow
 
     -- Next rounds
-    let sch = case room^.schedule of
-          ScheduleCalculating ps -> ps^.schBest
-          ScheduleDone x         -> x
-    ol_ [class_ "future-rounds",
-         start_ (T.show (length (room^.pastGames) + 1))] $
-      for_ (sch^..each) $ \(namerPos, guesserPos) -> li_ $ do
-        let namer   = players' !! namerPos
-            guesser = players' !! guesserPos
-        userLink namer >> " plays with " >> userLink guesser
+    case room^.schedule of
+      ScheduleCalculating ps -> p_ $ do
+        let iLeft = ps^.schIterationsTotal - ps^.schIterationsLeft
+            iTotal = ps^.schIterationsTotal
+        toHtml $ T.format
+          "The schedule is being calculated ({} out of {} iterations,\
+          \ or {}%). It shouldn't take more than 10 seconds. You can\
+          \ refresh the page to see the progress."
+          (iLeft, iTotal,
+           T.fixed 0 (fromIntegral iLeft / fromIntegral iTotal :: Double))
+      ScheduleDone sch -> do
+        ol_ [class_ "future-rounds",
+             start_ (T.show (length (room^.pastGames) + 1))] $
+          for_ (sch^..each) $ \(namerPos, guesserPos) -> li_ $ do
+            let namer   = players' !! namerPos
+                guesser = players' !! guesserPos
+            userLink namer >> " plays with " >> userLink guesser
 
 getGamePhaseRoom
   :: (MonadIO m, HasSpock (ActionCtxT ctx m),
