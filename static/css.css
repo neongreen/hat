@@ -192,3 +192,16 @@ textarea.fullwidth {
 .round-edit-popup [name=cancel] {
   float: right;
 }
+
+.future-rounds {
+  max-width: 500px;
+  max-height: 200px;
+  overflow:auto;
+  margin: auto;
+}
+.future-rounds li {
+  padding-left: 20px;
+  margin-bottom: 0px;
+  line-height: 40px;
+  border-bottom: 1px solid #ddd;
+}

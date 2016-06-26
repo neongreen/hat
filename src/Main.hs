@@ -741,6 +741,17 @@ roomPage gameId phaseNum roomNum = do
       penaltiesRow
       totalsRow
 
+    -- Next rounds
+    let sch = case room^.schedule of
+          ScheduleCalculating ps -> ps^.schBest
+          ScheduleDone x         -> x
+    ol_ [class_ "future-rounds",
+         start_ (T.show (length (room^.pastGames) + 1))] $
+      for_ (sch^..each) $ \(namerPos, guesserPos) -> li_ $ do
+        let namer   = players' !! namerPos
+            guesser = players' !! guesserPos
+        userLink namer >> " plays with " >> userLink guesser
+
 getGamePhaseRoom
   :: (MonadIO m, HasSpock (ActionCtxT ctx m),
       SpockState (ActionCtxT ctx m) ~ ServerState)

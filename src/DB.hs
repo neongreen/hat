@@ -172,6 +172,9 @@ data Room = Room {
   _roomAbsentees :: Set (Uid User),
   -- namer, guesser
   _roomTable :: Map (Uid User, Uid User) Round,
+  -- | History of past games. Might be inaccunrate because of manual editing,
+  -- but is guaranteed to include all played games in the 'table' and not
+  -- include any of the not-played games.
   _roomPastGames :: [(Uid User, Uid User)],
   _roomSchedule :: ScheduleStatus }
   deriving (Show)
@@ -355,18 +358,28 @@ setRoundResults
   -> Acid.Update GlobalState ()
 setRoundResults gameId phaseNum roomNum pls roundRes = do
   game' <- use (gameById gameId)
-  let phaseLens
+  let phaseLens :: Traversal' Game Phase
+      phaseLens
         | 1 <= phaseNum && phaseNum <= length (game'^.pastPhases) =
             pastPhases . ix (phaseNum-1) . _1
         | phaseNum == length (game'^.pastPhases) + 1 =
             currentPhase . _Just
         | otherwise =
             const pure    -- a traversal that doesn't traverse anything
-  gameById gameId
-    . phaseLens
-    . rooms . ix (roomNum-1)
-    . table . at pls
-    .= Just roundRes
+  let roomLens :: Lens' GlobalState Room
+      roomLens = singular $ gameById gameId.phaseLens.rooms.ix (roomNum-1)
+  old <- roomLens.table.at pls <<.= Just roundRes
+  -- Now we have to update 'pastGames'
+  case (fromMaybe RoundNotYetPlayed old, roundRes) of
+    (RoundNotYetPlayed, RoundPlayed{}) ->
+      roomLens.pastGames %= (<> [pls])
+    (RoundImpossible, RoundPlayed{}) ->
+      roomLens.pastGames %= (<> [pls])
+    (RoundPlayed{}, RoundNotYetPlayed) ->
+      roomLens.pastGames %= delete pls
+    (RoundPlayed{}, RoundImpossible) ->
+      roomLens.pastGames %= delete pls
+    _other -> return ()
 
 setWords :: Uid Game -> Uid User -> [Text] -> Acid.Update GlobalState ()
 setWords gameId userId ws =
