@@ -508,6 +508,19 @@ gameMethods = do
       fail "the guesser isn't playing in this room"
     dbUpdate (SetRoundResults gameId phaseNum roomNum (namerId, guesserId) res)
 
+  Spock.post (gamePhaseRoomVars <//> roundVars <//> "clear") $
+    \gameId phaseNum roomNum namerId guesserId -> do
+    (_, _, _, room) <-
+      getGamePhaseRoom gameId phaseNum roomNum
+    let res = RoundNotYetPlayed
+    when (namerId == guesserId) $
+      fail "a player can't play with themself"
+    when (namerId `notElem` room^.players) $
+      fail "the namer isn't playing in this room"
+    when (guesserId `notElem` room^.players) $
+      fail "the guesser isn't playing in this room"
+    dbUpdate (SetRoundResults gameId phaseNum roomNum (namerId, guesserId) res)
+
 gamePage
   :: Uid Game
   -> SpockActionCtx ctx conn Session ServerState ()

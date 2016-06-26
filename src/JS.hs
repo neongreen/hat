@@ -376,6 +376,13 @@ showRoundEditPopup =
       "type"  : "button",
       "name"  : "clear",
       "text"  : "Clear round" })[0];
+    $(clearButton).click(function() {
+      $.post("/game/" + gameId + "/" + phaseNum + "/" + roomNum +
+             "/round/" + namerId + "/" + guesserId + "/clear")
+       .done(function() {
+          location.reload();
+        });
+    });
 
     cancelButton = $("<button>", {
       "type"  : "button",
