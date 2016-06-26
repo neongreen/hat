@@ -673,7 +673,9 @@ roomPage gameId phaseNum roomNum = do
   let pageTitle = T.format "{}: phase #{}, room #{}"
                            (game'^.title, phaseNum, roomNum)
   lucidIO $ wrapPage sess s (pageTitle <> " | Hat") $ do
-    h2_ (toHtml pageTitle)
+    h2_ $ do
+      mkLink (toHtml (game'^.title)) (T.format "/game/{}" [game'^.uid])
+      toHtml $ T.format ": phase #{}, room #{}" (phaseNum, roomNum)
     table_ [class_ "roomtable"] $ do
       for_ [-1 .. length players' - 1] $ \y -> tr_ $
         for_ [-1 .. length players' - 1] $ \x -> do
