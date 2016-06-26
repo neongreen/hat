@@ -624,7 +624,6 @@ gamePage gameId = do
           p_ $ toHtml $ T.format "There {} {} {}."
                           (plural roomCount "was", roomCount,
                            plural roomCount "room")
-          -- TODO: links to rooms, etc
         unless (game'^.ended) $ case game'^.currentPhase of
           -- if there's a phase in progress, show it
           Just p -> do
@@ -643,7 +642,6 @@ gamePage gameId = do
                 (plural pls "is", pls, plural pls "player")
               "How many groups do you want?"
             numId <- randomLongUid
-            -- TODO: divide into 5-6-sized groups by default
             input_ [uid_ numId, type_ "number",
                     value_ (maybe "1" (T.show . length) groups'),
                     style_ "width: 30%; margin-right: 1em;"]
@@ -726,23 +724,6 @@ roomPage gameId phaseNum roomNum = do
                  if b == p^.uid then negate <$> r^?guesserPenalty else Nothing,
                  if a == p^.uid || b == p^.uid then r^?score else Nothing]
           td_ $ toHtml (T.show total)
-
-{- TODO:
-
-* widget to save score, penalty, etc of current player and move on to the next player
-* somehow deal with long player names in tables
-* actually entering/editing people's scores (and a button to erase round)
-* add instructions for editing
-* add “left person names, top person guesses”, or something like “X explains a word to Y” at the bottom, or even a log:
-  — X explains to Y
-  — A explains to B
-  — “game over” / “and 40 more turns”
-* mark/unmark absentees
-* show penalties for namers/guessers in cells themselves
-* timer
-* better style for the table
-* ability to add people to a phase even if they weren't present in the previous phase
--}
 
 getGamePhaseRoom
   :: (MonadIO m, HasSpock (ActionCtxT ctx m),
