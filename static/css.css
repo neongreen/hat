@@ -147,7 +147,7 @@ textarea.fullwidth {
 }
 
 .round-edit-popup {
-  max-width: 350px;
+  width: 400px;
   background: white;
   padding: 15px 20px;
   margin: 40px auto;
@@ -184,4 +184,11 @@ textarea.fullwidth {
 .round-edit-popup label {
   font-size: 1.3rem;
   margin-bottom: .2rem;
+}
+
+.round-edit-popup [name=clear] {
+  margin-left: 0.5em;
+}
+.round-edit-popup [name=cancel] {
+  float: right;
 }

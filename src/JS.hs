@@ -374,12 +374,12 @@ showRoundEditPopup =
 
     clearButton = $("<button>", {
       "type"  : "button",
-      "style" : "margin-left: 0.5rem",
+      "name"  : "clear",
       "text"  : "Clear round" })[0];
 
     cancelButton = $("<button>", {
       "type"  : "button",
-      "style" : "margin-left: 0.5rem; float: right;",
+      "name"  : "cancel",
       "class" : "button-outline",
       "text"  : "Cancel" })[0];
     $(cancelButton).click(function() {
