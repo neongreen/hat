@@ -638,14 +638,18 @@ gamePage gameId = do
               list $ map roomLink [1..length (p^.rooms)]
           -- if there isn't, choose players to advance to the next phase
           Nothing -> do
+            let pls = S.size (game'^.players)
             p_ $ do
-              let pls = S.size (game'^.players)
               toHtml $ T.format "There {} {} {}. "
                 (plural pls "is", pls, plural pls "player")
               "How many groups do you want?"
+            -- the least number of groups such that no group has 7 people
+            let defGroups = fromMaybe 1 $
+                  fmap (sum . map fst) $
+                  find (all (< 7) . map snd) (map (`calcBreak` pls) [1..])
             numId <- randomLongUid
             input_ [uid_ numId, type_ "number",
-                    value_ (maybe "1" (T.show . length) groups'),
+                    value_ (T.show $ maybe defGroups length groups'),
                     style_ "width: 30%; margin-right: 1em;"]
             button "Generate" [] $
               JS.generateGroups (gameId, JS.selectUid numId)
