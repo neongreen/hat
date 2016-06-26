@@ -1,5 +1,6 @@
 {-# LANGUAGE
 MultiWayIf,
+RecordWildCards,
 ScopedTypeVariables,
 TemplateHaskell,
 NoImplicitPrelude
@@ -10,11 +11,14 @@ module Schedule
 (
   Schedule,
   PartialSchedule,
+    schPastGames,
+    schPlayerCount,
     schCurrent,
     schBest,
     schIterationsTotal,
     schIterationsLeft,
-  findSchedule,
+  randomSchedule,
+  advancePartialSchedule,
   precomputedSchedules,
 )
 where
@@ -41,6 +45,8 @@ import Data.SafeCopy
 type Schedule = U.Vector (Int, Int)
 
 data PartialSchedule = PartialSchedule {
+  _schPlayerCount     :: Int,
+  _schPastGames       :: U.Vector (Int, Int),
   _schCurrent         :: Schedule,
   _schBest            :: Schedule,
   _schIterationsTotal :: Int,
@@ -49,6 +55,22 @@ data PartialSchedule = PartialSchedule {
 
 deriveSafeCopySimple 0 'base ''PartialSchedule
 makeLenses ''PartialSchedule
+
+advancePartialSchedule
+  :: Int -> PartialSchedule -> IO (Either PartialSchedule Schedule)
+advancePartialSchedule n p@PartialSchedule{..}
+  | _schIterationsLeft <= 0 = return (Right _schBest)
+  | otherwise = do
+      let curIter = _schIterationsTotal - _schIterationsLeft
+          iters   = min n _schIterationsLeft
+      (cur', bst') <- iterateSchedule
+                        _schPlayerCount _schPastGames
+                        curIter iters
+                        (_schCurrent, _schBest)
+      return $ Left p{
+        _schCurrent = cur',
+        _schBest = bst',
+        _schIterationsLeft = _schIterationsLeft - iters }
 
 {- |
 Things influencing rating:
@@ -122,33 +144,37 @@ rateSchedule pc past = do
   (\future -> sum $ imap (\i x -> x*0.5^(pc-i-1)) $ sort $
               map rate $ IM.elems $ updateMap (U.length past) pastMap future)
 
+-- | Generate a random future schedule (given past games).
+randomSchedule :: Int -> U.Vector (Int, Int) -> IO Schedule
+randomSchedule pc past =
+  fmap U.fromList $ shuffleM $
+  [(x, y) | x <- [0..pc-1], y <- [0..pc-1], x/=y] \\ U.toList past
+
 -- https://en.wikipedia.org/wiki/Simulated_annealing
-findSchedule
-  :: Int                     -- ^ Player count
-  -> U.Vector (Int, Int)     -- ^ Past games
-  -> Int                     -- ^ Iterations
-  -> IO Schedule             -- ^ Solution
-findSchedule pc past kmax = do
-  future <- fmap U.fromList $ shuffleM $
-    [(x, y) | x <- [0..pc-1], y <- [0..pc-1], x/=y] \\ U.toList past
-  let rfuture = rateSchedule pc past future
-  if U.null future then return past
-    else go (future, rfuture) (future, rfuture) kmax
+iterateSchedule
+  :: Int                       -- ^ Player count
+  -> U.Vector (Int, Int)       -- ^ Past games
+  -> Int                       -- ^ Current iteration
+  -> Int                       -- ^ Iterations to do
+  -> (Schedule, Schedule)      -- ^ Current schedule, best schedule
+  -> IO (Schedule, Schedule)   -- ^ New current and best schedule
+iterateSchedule pc past kcur kn (cur, bst) =
+    go (cur, rate cur) (bst, rate bst) kcur kn
   where
     rate = rateSchedule pc past
     p e e' t = if e' < e then 1 else exp ((e-e')/t)
-    go _       (sbest, _)      0 = return sbest
-    go (s, rs) (sbest, rsbest) k = do
+    go (s, _)  (sbest, _)      _ 0 = return (s, sbest)
+    go (s, rs) (sbest, rsbest) k n = do
       s' <- swap2 s
-      let t = 0.99999**(fromIntegral (kmax-k))
+      let t = 0.99999**(fromIntegral k)
           rs' = rate s'
       rnd <- randomIO
       let (sbest', rsbest')
             | rs' < rsbest = (s', rs')
             | otherwise    = (sbest, rsbest)
       if p rs rs' t >= rnd
-        then go (s', rs') (sbest', rsbest') (k-1)
-        else go (s , rs ) (sbest', rsbest') (k-1)
+        then go (s', rs') (sbest', rsbest') (k+1) (n-1)
+        else go (s , rs ) (sbest', rsbest') (k+1) (n-1)
 
 -- | Swap 2 random elements of an array.
 swap2 :: U.Unbox a => U.Vector a -> IO (U.Vector a)
