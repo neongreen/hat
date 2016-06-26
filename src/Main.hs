@@ -701,7 +701,7 @@ roomPage gameId phaseNum roomNum = do
                 ((a, b), r) <- M.toList (room^.table)
                 [if a == p^.uid then r^?namerPenalty else Nothing,
                  if b == p^.uid then r^?guesserPenalty else Nothing]
-          td_ $ when (penalty /= 0) $ toHtml (T.show penalty)
+          td_ $ when (penalty /= 0) $ toHtml ("−" <> T.show penalty)
       tr_ [class_ "totals"] $ do
         td_ "Total"
         for_ players' $ \p -> do
