@@ -338,6 +338,7 @@ showRoundEditPopup =
     inputScore = $("<input>", {
       "name"  : "score",
       "type"  : "number",
+      "min"   : "0",
       "value" : score })[0];
 
     penalties = $("<div>", {
@@ -350,6 +351,7 @@ showRoundEditPopup =
     inputNamerPenalty = $("<input>", {
       "name"  : "namer-penalty",
       "type"  : "number",
+      "min"   : "0",
       "value" : namerPenalty })[0];
     $(penalty1).append(labelNamerPenalty, inputNamerPenalty);
 
@@ -360,6 +362,7 @@ showRoundEditPopup =
     inputGuesserPenalty = $("<input>", {
       "name"  : "guesser-penalty",
       "type"  : "number",
+      "min"   : "0",
       "value" : guesserPenalty })[0];
     $(penalty2).append(labelGuesserPenalty, inputGuesserPenalty);
 

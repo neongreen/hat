@@ -492,8 +492,8 @@ gameMethods = do
   Spock.post (gamePhaseRoomVars <//> roundVars <//> "set") $
     \gameId phaseNum roomNum namerId guesserId -> do
     score'          <- param' "score"
-    namerPenalty'   <- param' "namer-penalty"
-    guesserPenalty' <- param' "guesser-penalty"
+    namerPenalty'   <- abs <$> param' "namer-penalty"
+    guesserPenalty' <- abs <$> param' "guesser-penalty"
     (_, _, _, room) <-
       getGamePhaseRoom gameId phaseNum roomNum
     let res = RoundPlayed {
@@ -718,7 +718,6 @@ roomPage gameId phaseNum roomNum = do
 * somehow deal with long player names in tables
 * actually entering/editing people's scores (and a button to erase round)
 * add instructions for editing
-* highlight cells on hover and change pointer
 * add “left person names, top person guesses”, or something like “X explains a word to Y” at the bottom, or even a log:
   — X explains to Y
   — A explains to B
