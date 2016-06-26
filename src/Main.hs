@@ -677,9 +677,51 @@ roomPage gameId phaseNum roomNum = do
   let pageTitle = T.format "{}: phase #{}, room #{}"
                            (game'^.title, phaseNum, roomNum)
   lucidIO $ wrapPage sess s (pageTitle <> " | Hat") $ do
+    -- Header
     h2_ $ do
       mkLink (toHtml (game'^.title)) (T.format "/game/{}" [game'^.uid])
       toHtml $ T.format ": phase #{}, room #{}" (phaseNum, roomNum)
+
+    -- Helper: round table cell
+    let roundCell px py = do
+          let roundRes = room^?!table.ix (py^.uid, px^.uid)
+          let handler = JS.showRoundEditPopup
+                          (gameId, phaseNum, roomNum,
+                           py^.uid, px^.uid,
+                           fromMaybe 0 (roundRes^?score),
+                           fromMaybe 0 (roundRes^?namerPenalty),
+                           fromMaybe 0 (roundRes^?guesserPenalty),
+                           fromMaybe 0 (roundRes^?discards))
+          case roundRes of
+            RoundNotYetPlayed ->
+              td_ [onClick handler, class_ "not-yet-played"] ""
+            RoundPlayed sc _ _ _ ->
+              td_ [onClick handler, class_ "played"] $ toHtml (T.show sc)
+            RoundImpossible ->
+              td_ [class_ "impossible"] ""
+
+    -- Helpers: penalties & totals
+    let penaltiesRow = tr_ [class_ "penalties"] $ do
+          td_ "Penalty"
+          for_ players' $ \p -> do
+            let penalty = sum . catMaybes $ do
+                  ((a, b), r) <- M.toList (room^.table)
+                  [guard (p^.uid == a) *> r^?discards,
+                   guard (p^.uid == a) *> r^?namerPenalty,
+                   guard (p^.uid == b) *> r^?guesserPenalty ]
+            td_ $ when (penalty /= 0) $ toHtml ("−" <> T.show penalty)
+    let totalsRow = tr_ [class_ "totals"] $ do
+          td_ "Total"
+          for_ players' $ \p -> do
+            let total = sum . catMaybes $ do
+                  ((a, b), r) <- M.toList (room^.table)
+                  [guard (p^.uid == a)         *> r^?discards.to negate,
+                   guard (p^.uid == a)         *> r^?namerPenalty.to negate,
+                   guard (p^.uid == b)         *> r^?guesserPenalty.to negate,
+                   guard (p^.uid `elem` [a,b]) *> r^?score ]
+            td_ $ toHtml (T.show total)
+
+    -- Actually generate the table
     table_ [class_ "roomtable"] $ do
       for_ [-1 .. length players' - 1] $ \y -> tr_ $
         for_ [-1 .. length players' - 1] $ \x -> do
@@ -692,47 +734,12 @@ roomPage gameId phaseNum roomNum = do
             case (x, y) of
               (-1, -1) -> td_ [class_ "header-corner"] ""
               -- left column: namers
-              (-1,  _) -> td_ [class_ "header-left"] $
-                          userLink py
+              (-1,  _) -> td_ [class_ "header-left"] (userLink py)
               -- upper row: guessers
-              ( _, -1) -> td_ [class_ "header-top"] $
-                          userLink px
-              ( _,  _) -> do
-                let roundRes = room^?!table.ix (py^.uid, px^.uid)
-                let handler = JS.showRoundEditPopup
-                                (gameId, phaseNum, roomNum,
-                                 py^.uid, px^.uid,
-                                 fromMaybe 0 (roundRes^?score),
-                                 fromMaybe 0 (roundRes^?namerPenalty),
-                                 fromMaybe 0 (roundRes^?guesserPenalty),
-                                 fromMaybe 0 (roundRes^?discards))
-                case roundRes of
-                  RoundNotYetPlayed ->
-                    td_ [onClick handler, class_ "not-yet-played"] ""
-                  RoundPlayed sc _ _ _ ->
-                    td_ [onClick handler, class_ "played"] $ toHtml (T.show sc)
-                  RoundImpossible ->
-                    td_ [class_ "impossible"] ""
-      -- totals
-      tr_ [class_ "penalties"] $ do
-        td_ "Penalty"
-        for_ players' $ \p -> do
-          let penalty = sum . catMaybes $ do
-                ((a, b), r) <- M.toList (room^.table)
-                [if a == p^.uid then r^?discards       else Nothing,
-                 if a == p^.uid then r^?namerPenalty   else Nothing,
-                 if b == p^.uid then r^?guesserPenalty else Nothing]
-          td_ $ when (penalty /= 0) $ toHtml ("−" <> T.show penalty)
-      tr_ [class_ "totals"] $ do
-        td_ "Total"
-        for_ players' $ \p -> do
-          let total = sum . catMaybes $ do
-                ((a, b), r) <- M.toList (room^.table)
-                [if a == p^.uid then negate <$> r^?discards       else Nothing,
-                 if a == p^.uid then negate <$> r^?namerPenalty   else Nothing,
-                 if b == p^.uid then negate <$> r^?guesserPenalty else Nothing,
-                 if a == p^.uid || b == p^.uid then r^?score      else Nothing]
-          td_ $ toHtml (T.show total)
+              ( _, -1) -> td_ [class_ "header-top"] (userLink px)
+              ( _,  _) -> roundCell px py
+      penaltiesRow
+      totalsRow
 
 getGamePhaseRoom
   :: (MonadIO m, HasSpock (ActionCtxT ctx m),
