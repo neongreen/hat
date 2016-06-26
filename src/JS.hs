@@ -338,7 +338,7 @@ showRoundEditPopup =
     inputScore = $("<input>", {
       "name"  : "score",
       "type"  : "number",
-      "value" : score.toString() })[0];
+      "value" : score })[0];
 
     penalties = $("<div>", {
       "name" : "penalties" })[0];
@@ -350,7 +350,7 @@ showRoundEditPopup =
     inputNamerPenalty = $("<input>", {
       "name"  : "namer-penalty",
       "type"  : "number",
-      "value" : namerPenalty.toString() })[0];
+      "value" : namerPenalty })[0];
     $(penalty1).append(labelNamerPenalty, inputNamerPenalty);
 
     penalty2 = $("<div>")[0];
@@ -360,7 +360,7 @@ showRoundEditPopup =
     inputGuesserPenalty = $("<input>", {
       "name"  : "guesser-penalty",
       "type"  : "number",
-      "value" : guesserPenalty.toString() })[0];
+      "value" : guesserPenalty })[0];
     $(penalty2).append(labelGuesserPenalty, inputGuesserPenalty);
 
     $(penalties).append(penalty1, penalty2);
@@ -382,6 +382,9 @@ showRoundEditPopup =
     $(cancelButton).click(function() {
       $.magnificPopup.close(); });
 
+    $([inputScore, inputNamerPenalty, inputGuesserPenalty])
+      .focus(function() {this.select();});
+
     $(form).append(labelScore, inputScore,
                    penalties,
                    saveButton, clearButton, cancelButton);
@@ -389,6 +392,7 @@ showRoundEditPopup =
 
     $.magnificPopup.open({
       modal: true,
+      focus: "[name=score]",
       items: {
         src: dialog,
         type: 'inline' }
