@@ -50,6 +50,7 @@ allJSFunctions = JS . T.unlines . map fromJS $ [
   endPreregistration,
   generateGroups,
   beginNextPhase,
+  setAbsent,
   makeAdmin ]
 
 -- | A class for things that can be converted to Javascript syntax.
@@ -488,6 +489,19 @@ beginNextPhase =
   makeJSFunction "beginNextPhase" ["gameId"]
   [text|
     $.post("/game/" + gameId + "/begin-next-phase")
+     .done(function () {
+        location.reload();
+     });
+  |]
+
+setAbsent :: JSFunction a => a
+setAbsent =
+  makeJSFunction "setAbsent"
+                 ["gameId", "phaseNum", "roomNum", "playerId", "val"]
+  [text|
+    $.post("/game/" + gameId + "/" + phaseNum + "/" + roomNum +
+           "/player/" + playerId + "/absent",
+           {"val": val})
      .done(function () {
         location.reload();
      });

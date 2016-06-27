@@ -106,6 +106,20 @@ textarea.fullwidth {
   text-align: center;
 }
 
+.roomtable .header-top.absent {
+  background-color: #ddd;
+}
+.roomtable .header-left.absent {
+  background-color: #ddd;
+}
+
+.roomtable .absent-button {
+  width: 16px;
+  opacity: 0.7;
+  float: left;
+  margin-right: 8px;
+}
+
 .roomtable .header-corner {
   width: 200px;
   border-bottom: solid 2px;
@@ -128,10 +142,6 @@ textarea.fullwidth {
 
 .roomtable .played {
   background-color: lightgray;
-}
-
-.roomtable .absent {
-  opacity: 0.5;
 }
 
 .roomtable .penalties {

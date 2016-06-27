@@ -547,6 +547,15 @@ gameMethods = do
       fail "the guesser isn't playing in this room"
     dbUpdate (SetRoundResults gameId phaseNum roomNum (namerId, guesserId) res)
 
+  Spock.post (gamePhaseRoomVars <//> "player" <//> var <//> "absent") $
+    \gameId phaseNum roomNum playerId -> do
+    val <- (== ("true" :: Text)) <$> param' "val"
+    (_, _, _, room) <-
+      getGamePhaseRoom gameId phaseNum roomNum
+    when (playerId `notElem` room^.players) $
+      fail "the player isn't playing in this room"
+    dbUpdate (SetAbsent gameId phaseNum roomNum playerId val)
+
 gamePage
   :: Uid Game
   -> SpockActionCtx ctx conn Session ServerState ()
@@ -752,13 +761,24 @@ roomPage gameId phaseNum roomNum = do
           -- x = guesser, y = namer
           let px = players' !! x
               py = players' !! y
-          withP (x /= -1 && px^.uid `elem` room^.absentees ||
-                 y /= -1 && py^.uid `elem` room^.absentees)
-            [class_ "absent"] $
+              xAbsent = px^.uid `elem` room^.absentees
+              yAbsent = py^.uid `elem` room^.absentees
+          withP (x /= -1 && xAbsent || y /= -1 && yAbsent)
+            [class_ " absent "] $
             case (x, y) of
               (-1, -1) -> td_ [class_ "header-corner"] ""
               -- left column: namers
-              (-1,  _) -> td_ [class_ "header-left"] (userLink py)
+              (-1,  _) -> td_ [class_ "header-left"] $ do
+                if yAbsent
+                  then imgButton "mark as present" "/media-play.svg"
+                                 [class_ "absent-button"] $
+                         JS.setAbsent (gameId, phaseNum, roomNum,
+                                       py^.uid, False)
+                  else imgButton "mark as absent" "/media-pause.svg"
+                                 [class_ "absent-button"] $
+                         JS.setAbsent (gameId, phaseNum, roomNum,
+                                       py^.uid, True)
+                userLink py
               -- upper row: guessers
               ( _, -1) -> td_ [class_ "header-top"] (userLink px)
               ( _,  _) -> roundCell px py
@@ -865,6 +885,11 @@ onClick (JS js) = onclick_ js
 
 mkLink :: Monad m => HtmlT m a -> Url -> HtmlT m a
 mkLink x src = a_ [href_ src] x
+
+imgButton :: Monad m => Text -> Url -> [Attribute] -> JS -> HtmlT m ()
+imgButton alt src attrs (JS handler) =
+  a_ [href_ "#", onclick_ (handler <> "return false;")]
+     (img_ (src_ src : alt_ alt : title_ alt : attrs))
 
 list :: Monad m => [HtmlT m a] -> HtmlT m ()
 list = sequence_ . intersperse ", " . map void

@@ -84,6 +84,7 @@ module DB
   SetGameGroups(..),
   SetGameCurrentPhase(..),
   SetRoundResults(..),
+  SetAbsent(..),
   SetWords(..),
   AdvanceSchedule(..),
   SetDirty(..), UnsetDirty(..),
@@ -388,6 +389,29 @@ setRoundResults gameId phaseNum roomNum pls roundRes = do
       roomLens.pastGames %= delete pls
     _other -> return ()
 
+setAbsent
+  :: Uid Game
+  -> Int                    -- ^ Phase
+  -> Int                    -- ^ Room
+  -> Uid User               -- ^ Player
+  -> Bool
+  -> Acid.Update GlobalState ()
+setAbsent gameId phaseNum roomNum playerId val = do
+  game' <- use (gameById gameId)
+  -- TODO: factor this out (it's copied from setRoundResults)
+  let phaseLens :: Traversal' Game Phase
+      phaseLens
+        | 1 <= phaseNum && phaseNum <= length (game'^.pastPhases) =
+            pastPhases . ix (phaseNum-1) . _1
+        | phaseNum == length (game'^.pastPhases) + 1 =
+            currentPhase . _Just
+        | otherwise =
+            const pure    -- a traversal that doesn't traverse anything
+  let roomLens :: Lens' GlobalState Room
+      roomLens = singular $ gameById gameId.phaseLens.rooms.ix (roomNum-1)
+  if val then roomLens.absentees %= S.insert playerId
+         else roomLens.absentees %= S.delete playerId
+
 setWords :: Uid Game -> Uid User -> [Text] -> Acid.Update GlobalState ()
 setWords gameId userId ws =
   gameById gameId.wordReq._Just.submitted.at userId .= Just (S.fromList ws)
@@ -454,6 +478,7 @@ makeAcidic ''GlobalState [
   'setGameGroups,
   'setGameCurrentPhase,
   'setRoundResults,
+  'setAbsent,
   'setWords,
   'advanceSchedule,
   'setPartialSchedule,
