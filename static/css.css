@@ -85,12 +85,9 @@ textarea.fullwidth {
   margin-left: auto;
   margin-right: auto;
   table-layout: fixed;
-  width: inherit;
 }
 
 .roomtable td {
-  width: 60px;
-  height: 60px;
   padding: 10px;
   border-bottom: .1rem solid #e1e1e1;
   border-right:  .1rem solid #e1e1e1;
@@ -110,6 +107,7 @@ textarea.fullwidth {
 }
 
 .roomtable .header-corner {
+  width: 200px;
   border-bottom: solid 2px;
   border-right:  solid 2px;
 }
