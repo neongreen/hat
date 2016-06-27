@@ -699,12 +699,11 @@ gamePage gameId = do
             let defGroups = fromMaybe 1 $
                   fmap (sum . map fst) $
                   find (all (< 7) . map snd) (map (`calcBreak` pls) [1..])
-            numId <- randomLongUid
-            input_ [uid_ numId, type_ "number",
+            input_ [id_ "number-of-groups", type_ "number",
                     value_ (T.show $ maybe defGroups length groups'),
                     style_ "width: 30%; margin-right: 1em;"]
             button "Generate" [] $
-              JS.generateGroups (gameId, JS.selectUid numId)
+              JS.generateGroups (gameId, JS.selectId "number-of-groups")
             case groups' of
               Nothing -> return ()
               Just gs -> do
@@ -713,6 +712,28 @@ gamePage gameId = do
                     toHtml $ T.format "{} {}: "
                       (length g, plural (length g) "player")
                     list (map userLink g)
+                let maxGroup = maximum (map length gs)
+                    maxRounds = maxGroup*(maxGroup-1)
+                    defTime = 60 :: Int
+                p_ $ do
+                  "Time per round: "
+                  input_ [type_ "number", id_ "time-per-round",
+                          min_ "0", value_ (T.show defTime),
+                          style_ "width:5em;margin-bottom:0px;"]
+                  " seconds."
+                p_ $ do
+                  "There'll be "
+                  toHtml (T.show maxRounds)
+                  " rounds in the biggest room; assuming a 15 second delay"
+                  " between rounds, they'll take "
+                  let maxTime = maxRounds*defTime + (maxRounds-1)*15
+                  span_ [id_ "time-per-game"] $
+                    toHtml (T.show (maxTime `div` 60))
+                  " minutes."
+                onPageLoad $
+                  JS.recalcTime (maxRounds,
+                                 JS.selectId "time-per-round",
+                                 JS.selectId "time-per-game")
                 button "Begin next phase" [] $
                   JS.beginNextPhase [gameId]
 

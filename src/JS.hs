@@ -51,6 +51,7 @@ allJSFunctions = JS . T.unlines . map fromJS $ [
   generateGroups,
   beginNextPhase,
   setAbsent,
+  recalcTime,
   makeAdmin ]
 
 -- | A class for things that can be converted to Javascript syntax.
@@ -505,6 +506,16 @@ setAbsent =
      .done(function () {
         location.reload();
      });
+  |]
+
+recalcTime :: JSFunction a => a
+recalcTime =
+  makeJSFunction "recalcTime" ["maxRounds", "roundInput", "timeSpan"]
+  [text|
+    $(roundInput).bind('input', function() {
+       maxTime = maxRounds*this.value + (maxRounds-1)*15;
+       $(timeSpan).html(Math.floor(maxTime/60));
+    });
   |]
 
 -- When adding a function, don't forget to add it to 'allJSFunctions'!
