@@ -158,8 +158,9 @@ iterateSchedule
   -> Int                       -- ^ Iterations to do
   -> (Schedule, Schedule)      -- ^ Current schedule, best schedule
   -> IO (Schedule, Schedule)   -- ^ New current and best schedule
-iterateSchedule pc past kcur kn (cur, bst) =
-    go (cur, rate cur) (bst, rate bst) kcur kn
+iterateSchedule pc past kcur kn (cur, bst)
+  | U.null cur = return (cur, bst)
+  | otherwise  = go (cur, rate cur) (bst, rate bst) kcur kn
   where
     rate = rateSchedule pc past
     p e e' t = if e' < e then 1 else exp ((e-e')/t)

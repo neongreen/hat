@@ -533,6 +533,14 @@ gameMethods = do
     when (guesserId `notElem` room^.players) $
       fail "the guesser isn't playing in this room"
     dbUpdate (SetRoundResults gameId phaseNum roomNum (namerId, guesserId) res)
+    -- If the schedule is still being computed, we have to restart computing
+    -- it (but if the schedule was complete, it's been updated by
+    -- SetRoundResults)
+    db <- _db <$> Spock.getState
+    -- TODO: only do this if the phase is the current phase
+    case room^.schedule of
+      ScheduleDone{} -> return ()
+      ScheduleCalculating{} -> liftIO $ reschedule db gameId roomNum
 
   Spock.post (gamePhaseRoomVars <//> roundVars <//> "clear") $
     \gameId phaseNum roomNum namerId guesserId -> do
@@ -546,6 +554,14 @@ gameMethods = do
     when (guesserId `notElem` room^.players) $
       fail "the guesser isn't playing in this room"
     dbUpdate (SetRoundResults gameId phaseNum roomNum (namerId, guesserId) res)
+    -- If the schedule is still being computed, we have to restart computing
+    -- it (but if the schedule was complete, it's been updated by
+    -- SetRoundResults)
+    db <- _db <$> Spock.getState
+    -- TODO: only do this if the phase is the current phase
+    case room^.schedule of
+      ScheduleDone{} -> return ()
+      ScheduleCalculating{} -> liftIO $ reschedule db gameId roomNum
 
   Spock.post (gamePhaseRoomVars <//> "player" <//> var <//> "absent") $
     \gameId phaseNum roomNum playerId -> do
@@ -555,6 +571,9 @@ gameMethods = do
     when (playerId `notElem` room^.players) $
       fail "the player isn't playing in this room"
     dbUpdate (SetAbsent gameId phaseNum roomNum playerId val)
+    db <- _db <$> Spock.getState
+    -- TODO: only do this if the phase is the current phase
+    liftIO $ reschedule db gameId roomNum
 
 gamePage
   :: Uid Game

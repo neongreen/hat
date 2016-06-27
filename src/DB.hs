@@ -72,6 +72,7 @@ module DB
   userById,
   mkSchedule,
   execCommand,
+  reschedule,
 
   -- * Methods
   GetGlobalState(..),
@@ -389,14 +390,27 @@ setRoundResults gameId phaseNum roomNum pls roundRes = do
   let roomLens :: Lens' GlobalState Room
       roomLens = singular $ gameById gameId.phaseLens.rooms.ix (roomNum-1)
   old <- roomLens.table.at pls <<.= Just roundRes
-  -- Now we have to update 'pastGames'
+  -- Now we have to update 'pastGames' and the schedule
+  room <- use roomLens
   case (fromMaybe RoundNotYetPlayed old, roundRes) of
-    (RoundNotYetPlayed, RoundPlayed{}) ->
+    (RoundNotYetPlayed, RoundPlayed{}) -> do
       roomLens.pastGames %= (<> [pls])
-    (RoundImpossible, RoundPlayed{}) ->
+      case room^.schedule of
+        ScheduleCalculating _ -> return ()
+        ScheduleDone sch ->
+          roomLens.schedule .= ScheduleDone (delete pls sch)
+    (RoundImpossible, RoundPlayed{}) -> do
       roomLens.pastGames %= (<> [pls])
-    (RoundPlayed{}, RoundNotYetPlayed) ->
+      case room^.schedule of
+        ScheduleCalculating _ -> return ()
+        ScheduleDone sch ->
+          roomLens.schedule .= ScheduleDone (delete pls sch)
+    (RoundPlayed{}, RoundNotYetPlayed) -> do
       roomLens.pastGames %= delete pls
+      case room^.schedule of
+        ScheduleCalculating _ -> return ()
+        ScheduleDone sch ->
+          roomLens.schedule .= ScheduleDone (sch ++ [pls])
     (RoundPlayed{}, RoundImpossible) ->
       roomLens.pastGames %= delete pls
     _other -> return ()
@@ -503,6 +517,16 @@ makeAcidic ''GlobalState [
   'setPartialSchedule,
   'setDirty, 'unsetDirty
   ]
+
+reschedule :: DB -> Uid Game -> Int -> IO ()
+reschedule db gameId roomNum = do
+  game' <- Acid.query db (GetGame gameId)
+  let room = game'^?!currentPhase._Just.rooms.ix (roomNum-1)
+  sch <- randomSchedule (length (room^.remainingPlayers))
+                        (intPastGames room)
+  Acid.update db $
+    SetPartialSchedule gameId roomNum
+      (room^.remainingPlayers) (room^.filteredPastGames) sch
 
 execCommand :: DB -> String -> IO ()
 execCommand db s = do
@@ -643,14 +667,6 @@ execCommand db s = do
 
       addCommand "room.reschedule"
         "Generate a new schedule for a room"
-        (\(gameId, roomNum) -> do
-            game' <- Acid.query db (GetGame gameId)
-            let room = game'^?!currentPhase._Just.rooms.ix (roomNum-1)
-            sch <- randomSchedule (length (room^.remainingPlayers))
-                                  (intPastGames room)
-            Acid.update db $
-              SetPartialSchedule gameId roomNum
-                (room^.remainingPlayers) (room^.filteredPastGames) sch
-        )
+        (\(gameId, roomNum) -> reschedule db gameId roomNum)
         ((,) <$> gameArg
              <*> argument auto (metavar "ROOM"))
