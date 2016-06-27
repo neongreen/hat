@@ -392,7 +392,7 @@ gameMethods = do
           sch <- case precomputedSchedules ^? ix (length gr) of
             -- TODO: fix
             Nothing -> error "no known schedule"
-            Just ss -> uniform ss
+            Just ss -> mkSchedule gr <$> uniform ss
           return Room {
             _roomPlayers = gr,
             _roomAbsentees = mempty,
@@ -799,9 +799,9 @@ roomPage gameId phaseNum roomNum = do
       ScheduleDone sch -> do
         ol_ [class_ "future-rounds",
              start_ (T.show (length (room^.pastGames) + 1))] $
-          for_ (sch^..each) $ \(namerPos, guesserPos) -> li_ $ do
-            let namer   = players' !! namerPos
-                guesser = players' !! guesserPos
+          for_ (sch^..each) $ \(namerId, guesserId) -> li_ $ do
+            let Just namer   = find ((== namerId) . view uid) players'
+                Just guesser = find ((== guesserId) . view uid) players'
             userLink namer >> " plays with " >> userLink guesser
 
 getGamePhaseRoom

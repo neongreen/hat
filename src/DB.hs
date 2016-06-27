@@ -49,6 +49,7 @@ module DB
   ScheduleStatus(..),
   Room(..),
     absentees,
+    remainingPlayers,
     table,
     pastGames,
     schedule,
@@ -68,6 +69,7 @@ module DB
   -- * Stuff
   emptyState,
   userById,
+  mkSchedule,
   execCommand,
 
   -- * Methods
@@ -159,7 +161,7 @@ data Round
 
 data ScheduleStatus
   = ScheduleCalculating PartialSchedule
-  | ScheduleDone Schedule
+  | ScheduleDone [(Uid User, Uid User)]
   deriving (Show)
 
 data Phase = Phase {
@@ -214,6 +216,9 @@ makeFields ''Phase
 makeFields ''PhaseResults
 makeFields ''Room
 makeFields ''Game
+
+remainingPlayers :: SimpleGetter Room [Uid User]
+remainingPlayers = to $ \room -> room^.players \\ S.toList (room^.absentees)
 
 intPastGames :: Room -> U.Vector (Int, Int)
 intPastGames room =
@@ -416,21 +421,27 @@ setWords :: Uid Game -> Uid User -> [Text] -> Acid.Update GlobalState ()
 setWords gameId userId ws =
   gameById gameId.wordReq._Just.submitted.at userId .= Just (S.fromList ws)
 
+mkSchedule :: [Uid User] -> Schedule -> [(Uid User, Uid User)]
+mkSchedule players' sch = U.toList sch & each.each %~ (players'!!)
+
 advanceSchedule
   :: Uid Game
   -> Int
   -> PartialSchedule
   -> Either PartialSchedule Schedule
   -> Acid.Update GlobalState ()
-advanceSchedule gameId roomNum ps ps' =
-  gameById gameId.currentPhase._Just.rooms.ix (roomNum-1).schedule %=
-    \sch -> case sch of
-      ScheduleCalculating s
-        | s /= ps   -> sch
-        | otherwise -> case ps' of
-            Left  x -> ScheduleCalculating x
-            Right x -> ScheduleDone x
-      ScheduleDone _ -> sch
+advanceSchedule gameId roomNum ps ps' = do
+  let roomLens :: Lens' GlobalState Room
+      roomLens = singular $
+        gameById gameId.currentPhase._Just.rooms.ix (roomNum-1)
+  room <- use roomLens
+  roomLens.schedule .= case room^.schedule of
+    ScheduleCalculating s
+      | s /= ps   -> room^.schedule
+      | otherwise -> case ps' of
+          Left  x -> ScheduleCalculating x
+          Right x -> ScheduleDone (mkSchedule (room^.remainingPlayers) x)
+    ScheduleDone _ -> room^.schedule
 
 setPartialSchedule
   :: Uid Game
