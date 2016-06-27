@@ -50,6 +50,7 @@ module DB
   Room(..),
     absentees,
     remainingPlayers,
+    filteredPastGames,
     table,
     pastGames,
     schedule,
@@ -220,10 +221,16 @@ makeFields ''Game
 remainingPlayers :: SimpleGetter Room [Uid User]
 remainingPlayers = to $ \room -> room^.players \\ S.toList (room^.absentees)
 
+filteredPastGames :: SimpleGetter Room [(Uid User, Uid User)]
+filteredPastGames = to $ \room ->
+  filter (\(a,b) -> all (`S.notMember` (room^.absentees)) [a,b])
+         (room^.pastGames)
+
 intPastGames :: Room -> U.Vector (Int, Int)
 intPastGames room =
-  let playerIndex p = fromJust (elemIndex p (room^.players))
-  in  U.fromList (room^.pastGames & each.each %~ playerIndex)
+  let rp = room^.remainingPlayers
+      playerIndex p = fromJust (elemIndex p rp)
+  in  U.fromList (room^.filteredPastGames & each.each %~ playerIndex)
 
 data GlobalState = GlobalState {
   _globalStateUsers    :: [User],
@@ -446,8 +453,8 @@ advanceSchedule gameId roomNum ps ps' = do
 setPartialSchedule
   :: Uid Game
   -> Int
-  -> [Uid User]
-  -> [(Uid User, Uid User)]
+  -> [Uid User]                    -- ^ Non-absent players
+  -> [(Uid User, Uid User)]        -- ^ Past games of non-absent players
   -> Schedule
   -> Acid.Update GlobalState ()
 setPartialSchedule gameId roomNum players' pastGames' sch = do
@@ -460,7 +467,8 @@ setPartialSchedule gameId roomNum players' pastGames' sch = do
       iters | roundsLeft <= 3 = 50000
             | roundsLeft <= 6 = 100000
             | otherwise       = 400000
-  when (room^.players == players' && room^.pastGames == pastGames') $
+  when (room^.remainingPlayers == players' &&
+        room^.filteredPastGames == pastGames') $
     roomLens.schedule .= ScheduleCalculating (PartialSchedule {
       _schPlayerCount = playerCount,
       _schPastGames = intPastGames room,
@@ -638,10 +646,11 @@ execCommand db s = do
         (\(gameId, roomNum) -> do
             game' <- Acid.query db (GetGame gameId)
             let room = game'^?!currentPhase._Just.rooms.ix (roomNum-1)
-            sch <- randomSchedule (length (room^.players)) (intPastGames room)
+            sch <- randomSchedule (length (room^.remainingPlayers))
+                                  (intPastGames room)
             Acid.update db $
               SetPartialSchedule gameId roomNum
-                (room^.players) (room^.pastGames) sch
+                (room^.remainingPlayers) (room^.filteredPastGames) sch
         )
         ((,) <$> gameArg
              <*> argument auto (metavar "ROOM"))
