@@ -10,7 +10,7 @@ NoImplicitPrelude
 module Schedule
 (
   Schedule,
-  PartialSchedule,
+  PartialSchedule(..),
     schPastGames,
     schPlayerCount,
     schCurrent,
@@ -51,7 +51,7 @@ data PartialSchedule = PartialSchedule {
   _schBest            :: Schedule,
   _schIterationsTotal :: Int,
   _schIterationsLeft  :: Int }
-  deriving (Show)
+  deriving (Eq, Show)
 
 deriveSafeCopySimple 0 'base ''PartialSchedule
 makeLenses ''PartialSchedule

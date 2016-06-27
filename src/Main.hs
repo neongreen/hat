@@ -122,12 +122,36 @@ main = do
                 when (ss /= ssOld) $ do
                   Acid.update db SetDirty
                   Acid.update db (SetSessions ss) } } }
+    -- The command-line interface thread
     Slave.fork $ forever $ do
       putStr "> "
       cmd <- getLine
       putStrLn ""
       execCommand db cmd
       putStrLn ""
+    -- Thread to update all partial schedules; crude, but works
+    Slave.fork $ forever $ do
+      updatedAny <- newIORef False
+      games' <- view games <$> Acid.query db GetGlobalState
+      for_ games' $ \game' ->
+        ifor_ (game'^..currentPhase._Just.rooms.each) $ \i room ->
+          case room^.schedule of
+            ScheduleDone{} -> return ()
+            ScheduleCalculating ps -> do
+              writeIORef updatedAny True
+              -- It's possible that the room will be changed while the
+              -- computation is going. To prevent this, AdvanceSchedule will
+              -- only update the schedule if it matches the one we were
+              -- advancing.
+              ps' <- advancePartialSchedule 1000 ps
+              Acid.update db (AdvanceSchedule (game'^.uid) (i+1) ps ps')
+              when (isRight ps') $
+                T.putStrLn $ T.format
+                  "finished calculating schedule for game {}, room #{}"
+                  (game'^.uid, i+1)
+      upd <- readIORef updatedAny
+      when (not upd) $ threadDelay 50000
+
     runSpockNoBanner 7070 $ spock spockConfig $ do
       middleware (staticPolicy (addBase "static"))
       Spock.get "/js.js" $ do
@@ -751,7 +775,7 @@ roomPage gameId phaseNum roomNum = do
           \ or {}%). It shouldn't take more than 10 seconds. You can\
           \ refresh the page to see the progress."
           (iLeft, iTotal,
-           T.fixed 0 (fromIntegral iLeft / fromIntegral iTotal :: Double))
+           T.fixed 0 (100*fromIntegral iLeft/fromIntegral iTotal :: Double))
       ScheduleDone sch -> do
         ol_ [class_ "future-rounds",
              start_ (T.show (length (room^.pastGames) + 1))] $

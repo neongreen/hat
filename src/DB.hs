@@ -85,6 +85,7 @@ module DB
   SetGameCurrentPhase(..),
   SetRoundResults(..),
   SetWords(..),
+  AdvanceSchedule(..),
   SetDirty(..), UnsetDirty(..),
 )
 where
@@ -95,11 +96,12 @@ import BasePrelude
 -- Monads
 import Control.Monad.State
 -- Lenses
-import Lens.Micro.Platform
+import Lens.Micro.Platform hiding ((&))
 -- Containers
 import Data.Map (Map)
 import qualified Data.Set as S
 import Data.Set (Set)
+import qualified Data.Vector.Unboxed as U
 -- Text
 import qualified Data.Text.All as T
 import Data.Text.All (Text)
@@ -211,6 +213,11 @@ makeFields ''Phase
 makeFields ''PhaseResults
 makeFields ''Room
 makeFields ''Game
+
+intPastGames :: Room -> U.Vector (Int, Int)
+intPastGames room =
+  let playerIndex p = fromJust (elemIndex p (room^.players))
+  in  U.fromList (room^.pastGames & each.each %~ playerIndex)
 
 data GlobalState = GlobalState {
   _globalStateUsers    :: [User],
@@ -385,6 +392,48 @@ setWords :: Uid Game -> Uid User -> [Text] -> Acid.Update GlobalState ()
 setWords gameId userId ws =
   gameById gameId.wordReq._Just.submitted.at userId .= Just (S.fromList ws)
 
+advanceSchedule
+  :: Uid Game
+  -> Int
+  -> PartialSchedule
+  -> Either PartialSchedule Schedule
+  -> Acid.Update GlobalState ()
+advanceSchedule gameId roomNum ps ps' =
+  gameById gameId.currentPhase._Just.rooms.ix (roomNum-1).schedule %=
+    \sch -> case sch of
+      ScheduleCalculating s
+        | s /= ps   -> sch
+        | otherwise -> case ps' of
+            Left  x -> ScheduleCalculating x
+            Right x -> ScheduleDone x
+      ScheduleDone _ -> sch
+
+setPartialSchedule
+  :: Uid Game
+  -> Int
+  -> [Uid User]
+  -> [(Uid User, Uid User)]
+  -> Schedule
+  -> Acid.Update GlobalState ()
+setPartialSchedule gameId roomNum players' pastGames' sch = do
+  let roomLens :: Lens' GlobalState Room
+      roomLens = singular $
+        gameById gameId.currentPhase._Just.rooms.ix (roomNum-1)
+  room <- use roomLens
+  let playerCount = length players'
+      roundsLeft = playerCount*(playerCount-1) - length pastGames'
+      iters | roundsLeft <= 3 = 50000
+            | roundsLeft <= 6 = 100000
+            | otherwise       = 400000
+  when (room^.players == players' && room^.pastGames == pastGames') $
+    roomLens.schedule .= ScheduleCalculating (PartialSchedule {
+      _schPlayerCount = playerCount,
+      _schPastGames = intPastGames room,
+      _schCurrent = sch,
+      _schBest = sch,
+      _schIterationsTotal = iters,
+      _schIterationsLeft = iters })
+
 setDirty :: Acid.Update GlobalState ()
 setDirty = dirty .= True
 
@@ -406,6 +455,8 @@ makeAcidic ''GlobalState [
   'setGameCurrentPhase,
   'setRoundResults,
   'setWords,
+  'advanceSchedule,
+  'setPartialSchedule,
   'setDirty, 'unsetDirty
   ]
 
@@ -436,6 +487,7 @@ execCommand db s = do
             Nothing -> Right input
             Just x  -> Left (Uid x))
       (metavar "(NICK|id:ID)")
+    gameArg = Uid . T.pack <$> strArgument (metavar "GAME")
 
     findUser = either (Acid.query db . GetUser)
                       (Acid.query db . GetUserByNick)
@@ -505,8 +557,7 @@ execCommand db s = do
             user <- findUser u
             Acid.update db (AddPlayer g (user^.uid))
         )
-        ((,) <$> (Uid . T.pack <$> strArgument (metavar "GAME"))
-             <*> userArg)
+        ((,) <$> gameArg <*> userArg)
 
       addCommand' "populate"
         "Generate random users and games"
@@ -545,3 +596,16 @@ execCommand db s = do
               putStr "."
             putStrLn ""
         )
+
+      addCommand "room.reschedule"
+        "Generate a new schedule for a room"
+        (\(gameId, roomNum) -> do
+            game' <- Acid.query db (GetGame gameId)
+            let room = game'^?!currentPhase._Just.rooms.ix (roomNum-1)
+            sch <- randomSchedule (length (room^.players)) (intPastGames room)
+            Acid.update db $
+              SetPartialSchedule gameId roomNum
+                (room^.players) (room^.pastGames) sch
+        )
+        ((,) <$> gameArg
+             <*> argument auto (metavar "ROOM"))
