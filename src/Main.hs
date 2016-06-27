@@ -747,8 +747,16 @@ roomPage gameId phaseNum roomNum = do
           case roundRes of
             RoundNotYetPlayed ->
               td_ [onClick handler, class_ "not-yet-played"] ""
-            RoundPlayed sc _ _ _ ->
-              td_ [onClick handler, class_ "played"] $ toHtml (T.show sc)
+            RoundPlayed score' namerPenalty' guesserPenalty' discards' ->
+              td_ [onClick handler, class_ "played"] $ div_ $ do
+                when (namerPenalty' + discards' /= 0) $
+                  span_ [class_ "namer-penalty"] $
+                    toHtml ("−" <> T.show (namerPenalty' + discards'))
+                when (guesserPenalty' /= 0) $
+                  span_ [class_ "guesser-penalty"] $
+                    toHtml ("−" <> T.show guesserPenalty')
+                span_ [class_ "score"] $
+                  toHtml (T.show score')
             RoundImpossible ->
               td_ [class_ "impossible"] ""
 

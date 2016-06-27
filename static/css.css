@@ -154,6 +154,21 @@ textarea.fullwidth {
   text-align: center;      /* this has no effect on first cell */
 }
 
+.roomtable td.played div {
+  text-align: center;
+  position: relative;
+}
+.roomtable td .namer-penalty {
+  position: absolute;
+  left: 0;
+  font-size: 60%;
+}
+.roomtable td .guesser-penalty {
+  position: absolute;
+  right: 0;
+  font-size: 60%;
+}
+
 .round-edit-popup {
   width: 450px;
   background: white;
