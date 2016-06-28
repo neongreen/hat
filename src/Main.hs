@@ -166,6 +166,7 @@ main = do
             li_ $ mkLink (toHtml (g^.title))
                          ("/game/" <> uidToText (g^.uid))
       gameMethods
+      roomMethods
       userMethods
 
       Spock.get "admin" $ do
@@ -375,6 +376,7 @@ gameMethods = do
     jsonSuccess
 
   Spock.post (gameVar <//> "begin-next-phase") $ \gameId -> do
+    timePerRound' <- param' "time-per-round"
     currentAdmin <- isAdmin
     game' <- dbQuery (GetGame gameId)
     when (not currentAdmin) $
@@ -394,6 +396,7 @@ gameMethods = do
             Nothing -> error "no known schedule"
             Just ss -> mkSchedule gr <$> uniform ss
           return Room {
+            _roomCurrentRound = Nothing,
             _roomPlayers = gr,
             _roomAbsentees = mempty,
             _roomTable = M.fromList [
@@ -402,6 +405,7 @@ gameMethods = do
             _roomPastGames = [],
             _roomSchedule = ScheduleDone sch }
         let phase' = Phase {
+              _phaseTimePerRound = timePerRound',
               _phaseRooms = rooms' }
         dbUpdate (SetGameCurrentPhase gameId phase')
         jsonSuccess
@@ -513,6 +517,8 @@ gameMethods = do
     dbUpdate (SetWords gameId u ws)
     jsonSuccess
 
+roomMethods :: SpockM ctx Session ServerState ()
+roomMethods = do
   Spock.post (gamePhaseRoomVars <//> roundVars <//> "set") $
     \gameId phaseNum roomNum namerId guesserId -> do
     score'          <- param' "score"
@@ -574,6 +580,22 @@ gameMethods = do
     db <- _db <$> Spock.getState
     -- TODO: only do this if the phase is the current phase
     liftIO $ reschedule db gameId roomNum
+
+  -- TODO: this should only work on current phase
+  Spock.post (gamePhaseRoomVars <//> "start-round") $
+    \gameId phaseNum roomNum -> do
+    (_, _, _, room) <-
+      getGamePhaseRoom gameId phaseNum roomNum
+    case (room^.currentRound, room^.schedule) of
+      (Just _, _) ->
+        fail "there's already a round in progress"
+      (Nothing, ScheduleCalculating{}) ->
+        fail "schedule is still calculating"
+      (Nothing, ScheduleDone []) ->
+        fail "there are no rounds left to play"
+      (Nothing, ScheduleDone _) -> do
+        now <- liftIO getCurrentTime
+        dbUpdate (StartRound gameId roomNum now)
 
 gamePage
   :: Uid Game
@@ -734,8 +756,8 @@ gamePage gameId = do
                   JS.recalcTime (maxRounds,
                                  JS.selectId "time-per-round",
                                  JS.selectId "time-per-game")
-                button "Begin next phase" [] $
-                  JS.beginNextPhase [gameId]
+                button "Begin phase" [] $
+                  JS.beginNextPhase (gameId, JS.selectId "time-per-round")
 
 roomPage
   :: Uid Game
@@ -833,24 +855,50 @@ roomPage gameId phaseNum roomNum = do
       penaltiesRow
       totalsRow
 
-    -- Next rounds
-    case room^.schedule of
-      ScheduleCalculating ps -> p_ $ do
-        let iLeft = ps^.schIterationsTotal - ps^.schIterationsLeft
-            iTotal = ps^.schIterationsTotal
-        toHtml $ T.format
-          "The schedule is being calculated ({} out of {} iterations,\
-          \ or {}%). It shouldn't take more than 10 seconds. You can\
-          \ refresh the page to see the progress."
-          (iLeft, iTotal,
-           T.fixed 0 (100*fromIntegral iLeft/fromIntegral iTotal :: Double))
-      ScheduleDone sch -> do
-        ol_ [class_ "future-rounds",
-             start_ (T.show (length (room^.pastGames) + 1))] $
-          for_ (sch^..each) $ \(namerId, guesserId) -> li_ $ do
-            let Just namer   = find ((== namerId) . view uid) players'
+    div_ [id_ "rounds-container"] $ do
+      -- Next rounds
+      div_ [class_ "future-rounds"] $ do
+        h5_ "Rounds left to play"
+        case room^.schedule of
+          ScheduleCalculating ps -> p_ $ do
+            let iLeft = ps^.schIterationsTotal - ps^.schIterationsLeft
+                iTotal = ps^.schIterationsTotal
+                percent = 100*fromIntegral iLeft/fromIntegral iTotal :: Double
+            toHtml $ T.format
+              "The schedule is being calculated ({} out of {} iterations,\
+            \ or {}%). It shouldn't take more than 10 seconds. You can\
+            \ refresh the page to see the progress."
+              (iLeft, iTotal, T.fixed 0 percent)
+          ScheduleDone sch -> do
+            ol_ [start_ (T.show (length (room^.pastGames) + 1))] $
+              for_ (sch^..each) $ \(namerId, guesserId) -> li_ $ do
+                let Just namer   = find ((== namerId) . view uid) players'
+                    Just guesser = find ((== guesserId) . view uid) players'
+                userLink namer >> " plays with " >> userLink guesser
+      -- Current round
+      case (room^.currentRound, room^.schedule) of
+        (Nothing, ScheduleCalculating{}) -> return ()
+        -- TODO: this might show something like “finalise room results”
+        (Nothing, ScheduleDone []) -> return ()
+        (Nothing, ScheduleDone ((namerId, guesserId):_)) ->
+          div_ [class_ "current-round"] $ do
+            h5_ "Current round"
+            let Just namer = find ((== namerId) . view uid) players'
                 Just guesser = find ((== guesserId) . view uid) players'
-            userLink namer >> " plays with " >> userLink guesser
+            span_ $ userLink namer >> " plays with " >> userLink guesser
+            button "Start round" [] $
+              JS.startRound (gameId, phaseNum, roomNum)
+        (Just cr, _) ->
+          div_ [class_ "current-round"] $ do
+            h5_ "Current round"
+            now <- liftIO getCurrentTime
+            case cr^.timer of
+              TimerPaused t ->
+                span_ [id_ "timer-num"] $ toHtml (T.show t)
+              TimerGoing t -> do
+                let d = max 0 (round (diffUTCTime t now) :: Int)
+                onPageLoad $ JS.keepTimer (JS.selectId "timer-num", d)
+                span_ [id_ "timer-num"] ""
 
 getGamePhaseRoom
   :: (MonadIO m, HasSpock (ActionCtxT ctx m),

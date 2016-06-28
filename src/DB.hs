@@ -39,6 +39,7 @@ module DB
     pastPhases,
     currentPhase,
   Phase(..),
+    timePerRound,
   PhaseResults(..),
     winners,
   Round(..),
@@ -47,7 +48,11 @@ module DB
     guesserPenalty,
     discards,
   ScheduleStatus(..),
+  Timer(..),
+  CurrentRound(..),
+    timer,
   Room(..),
+    currentRound,
     absentees,
     remainingPlayers,
     filteredPastGames,
@@ -87,6 +92,7 @@ module DB
   SetGameBegun(..),
   SetGameGroups(..),
   SetGameCurrentPhase(..),
+  StartRound(..),
   SetRoundResults(..),
   SetAbsent(..),
   SetWords(..),
@@ -167,6 +173,8 @@ data ScheduleStatus
   deriving (Show)
 
 data Phase = Phase {
+  -- | In seconds
+  _phaseTimePerRound :: Int,
   _phaseRooms :: [Room] }
   deriving (Show)
 
@@ -174,7 +182,22 @@ data PhaseResults = Results {
   _phaseResultsWinners :: [[Uid User]] }
   deriving (Show)
 
+data CurrentRound = CurrentRound {
+  _currentRoundPlayers :: (Uid User, Uid User),
+  _currentRoundScore :: Int,
+  _currentRoundNamerPenalty :: Int,
+  _currentRoundGuesserPenalty :: Int,
+  _currentRoundDiscards :: Int,
+  _currentRoundTimer :: Timer }
+  deriving (Show)
+
+data Timer
+  = TimerGoing UTCTime    -- when the timer will end
+  | TimerPaused Int       -- how many seconds are left
+  deriving (Show)
+
 data Room = Room {
+  _roomCurrentRound :: Maybe CurrentRound,
   _roomPlayers :: [Uid User],
   _roomAbsentees :: Set (Uid User),
   -- namer, guesser
@@ -207,6 +230,8 @@ deriveSafeCopySimple 0 'base ''Round
 deriveSafeCopySimple 0 'base ''ScheduleStatus
 deriveSafeCopySimple 0 'base ''Phase
 deriveSafeCopySimple 0 'base ''PhaseResults
+deriveSafeCopySimple 0 'base ''Timer
+deriveSafeCopySimple 0 'base ''CurrentRound
 deriveSafeCopySimple 0 'base ''Room
 deriveSafeCopySimple 0 'base ''Game
 
@@ -216,6 +241,7 @@ makeFields ''Round
 makeFields ''ScheduleStatus
 makeFields ''Phase
 makeFields ''PhaseResults
+makeFields ''CurrentRound
 makeFields ''Room
 makeFields ''Game
 
@@ -370,6 +396,30 @@ setGameGroups gameId val = gameById gameId . groups .= val
 setGameCurrentPhase :: Uid Game -> Phase -> Acid.Update GlobalState ()
 setGameCurrentPhase gameId val = gameById gameId . currentPhase .= Just val
 
+startRound
+  :: Uid Game
+  -> Int                    -- ^ Room
+  -> UTCTime                -- ^ Current time
+  -> Acid.Update GlobalState ()
+startRound gameId roomNum now = do
+  let phaseLens :: Lens' GlobalState Phase
+      phaseLens = singular $ gameById gameId.currentPhase._Just
+      roomLens :: Lens' Phase Room
+      roomLens = singular $ rooms.ix (roomNum-1)
+  phase' <- use phaseLens
+  let room = phase'^.roomLens
+  let timerEnd = fromIntegral (phase'^.timePerRound) `addUTCTime` now
+  phaseLens.roomLens.currentRound .= Just CurrentRound {
+    _currentRoundPlayers = case room^.schedule of
+        ScheduleCalculating{} -> error "startRound: no schedule"
+        ScheduleDone [] -> error "startRound: no rounds"
+        ScheduleDone (x:_) -> x,
+    _currentRoundScore = 0,
+    _currentRoundNamerPenalty = 0,
+    _currentRoundGuesserPenalty = 0,
+    _currentRoundDiscards = 0,
+    _currentRoundTimer = TimerGoing timerEnd }
+
 setRoundResults
   :: Uid Game
   -> Int                    -- ^ Phase
@@ -510,6 +560,7 @@ makeAcidic ''GlobalState [
   'setGameBegun,
   'setGameGroups,
   'setGameCurrentPhase,
+  'startRound,
   'setRoundResults,
   'setAbsent,
   'setWords,

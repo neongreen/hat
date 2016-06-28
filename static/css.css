@@ -216,15 +216,38 @@ textarea.fullwidth {
   float: right;
 }
 
-.future-rounds {
+.future-rounds ol {
   max-width: 500px;
   max-height: 200px;
   overflow:auto;
   margin: auto;
 }
-.future-rounds li {
+.future-rounds ol li {
   padding-left: 20px;
   margin-bottom: 0px;
   line-height: 40px;
   border-bottom: 1px solid #ddd;
+}
+
+#rounds-container {
+  display: flex;
+  margin: 0 -1em;
+  margin-top: 2em;
+}
+.future-rounds {
+  flex: 1;
+  margin: 0 1em;
+}
+.current-round {
+  flex: 1;
+  margin: 0 1em;
+}
+
+#rounds-container h5 {
+  border-bottom: 1.5px solid;
+}
+
+#timer-num {
+  font-size: 1.5em;
+  font-weight: bold;
 }

@@ -51,7 +51,9 @@ allJSFunctions = JS . T.unlines . map fromJS $ [
   generateGroups,
   beginNextPhase,
   setAbsent,
+  startRound,
   recalcTime,
+  keepTimer,
   makeAdmin ]
 
 -- | A class for things that can be converted to Javascript syntax.
@@ -487,9 +489,10 @@ generateGroups =
 
 beginNextPhase :: JSFunction a => a
 beginNextPhase =
-  makeJSFunction "beginNextPhase" ["gameId"]
+  makeJSFunction "beginNextPhase" ["gameId", "timeInput"]
   [text|
-    $.post("/game/" + gameId + "/begin-next-phase")
+    time = parseInt($(timeInput)[0].value, 10);
+    $.post("/game/" + gameId + "/begin-next-phase", {"time-per-round": time})
      .done(function () {
         location.reload();
      });
@@ -508,6 +511,16 @@ setAbsent =
      });
   |]
 
+startRound :: JSFunction a => a
+startRound =
+  makeJSFunction "startRound" ["gameId", "phaseNum", "roomNum"]
+  [text|
+    $.post("/game/" + gameId + "/" + phaseNum + "/" + roomNum + "/start-round")
+     .done(function () {
+        location.reload();
+     });
+  |]
+
 recalcTime :: JSFunction a => a
 recalcTime =
   makeJSFunction "recalcTime" ["maxRounds", "roundInput", "timeSpan"]
@@ -516,6 +529,22 @@ recalcTime =
        maxTime = maxRounds*this.value + (maxRounds-1)*15;
        $(timeSpan).html(Math.floor(maxTime/60));
     });
+  |]
+
+keepTimer :: JSFunction a => a
+keepTimer =
+  makeJSFunction "keepTimer" ["timerNode", "time"]
+  [text|
+    m = Math.floor(time/60);
+    s = time % 60;
+    $(timerNode).text(m+":"+("00"+s).slice(-2));
+    setInterval(function() {
+      if (s > 0 || m > 0) {
+        s = s-1;
+        if (s<0) {s = s+60; m = m-1;}
+      }
+      $(timerNode).text(m+":"+("00"+s).slice(-2));
+    }, 1000);
   |]
 
 -- When adding a function, don't forget to add it to 'allJSFunctions'!
