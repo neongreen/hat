@@ -791,6 +791,7 @@ roomPage gameId phaseNum roomNum = do
   sess <- readSession
   (game', _, _, room) <- getGamePhaseRoom gameId phaseNum roomNum
   players' <- mapM (dbQuery . GetUser) (room^.players)
+  let findPlayer pid = fromJust $ find ((== pid) . view uid) players'
   let pageTitle = T.format "{}: phase #{}, room #{}"
                            (game'^.title, phaseNum, roomNum)
   lucidIO $ wrapPage sess s (pageTitle <> " | Hat") $ do
@@ -798,8 +799,6 @@ roomPage gameId phaseNum roomNum = do
     h2_ $ do
       mkLink (toHtml (game'^.title)) (T.format "/game/{}" [game'^.uid])
       toHtml $ T.format ": phase #{}, room #{}" (phaseNum, roomNum)
-
--- TODO: show page differently if not current phase
 
     -- Helper: round table cell
     let roundCell px py = do
@@ -894,31 +893,41 @@ roomPage gameId phaseNum roomNum = do
               \ refresh the page to see the progress."
               (iLeft, iTotal, T.fixed 0 percent)
           ScheduleDone sch -> do
-            ol_ [start_ (T.show (length (room^.pastGames) + 1))] $
-              for_ (sch^..each) $ \(namerId, guesserId) -> li_ $ do
-                let Just namer   = find ((== namerId) . view uid) players'
-                    Just guesser = find ((== guesserId) . view uid) players'
-                let pw = userLink namer >> " plays with " >> userLink guesser
-                if room^?currentRound._Just.players==Just (namerId, guesserId)
-                  then strong_ pw else pw
+            let roundsLeft = sch^..each
+                allPlayed = length (room^.pastGames) ==
+                            length players' * (length players' - 1)
+            if | null roundsLeft && allPlayed ->
+                   "None."
+               | null roundsLeft ->
+                   "None (but some absent players still haven't played)."
+               | otherwise -> do
+                   let start = length (room^.pastGames) + 1
+                   ol_ [start_ (T.show start)] $
+                     for_ roundsLeft $ \(namerId, guesserId) -> li_ $ do
+                     let namer = findPlayer namerId
+                         guesser = findPlayer guesserId
+                     let pw = userLink namer >> " plays with " >>
+                              userLink guesser
+                     let currentPlayers = room^?currentRound._Just.players
+                     if currentPlayers == Just (namerId, guesserId)
+                       then strong_ pw else pw
       -- Current round
-      case (room^.currentRound, room^.schedule) of
-        (Nothing, ScheduleCalculating{}) -> return ()
-        -- TODO: this might show something like “finalise room results”
-        (Nothing, ScheduleDone []) -> return ()
-        (Nothing, ScheduleDone ((namerId, guesserId):_)) ->
-          div_ [class_ "current-round"] $ do
-            h5_ "Current round"
-            let Just namer = find ((== namerId) . view uid) players'
-                Just guesser = find ((== guesserId) . view uid) players'
+      div_ [class_ "current-round"] $ do
+        h5_ "Current round"
+        case (room^.currentRound, room^.schedule) of
+          (Nothing, ScheduleCalculating{}) ->
+            "The current round is unavailable at the moment."
+          (Nothing, ScheduleDone []) ->
+            "None!"
+          (Nothing, ScheduleDone ((namerId, guesserId):_)) -> do
+            let namer = findPlayer namerId
+                guesser = findPlayer guesserId
             span_ [id_ "who-plays-with-who"] $
               userLink namer >> " plays with " >> userLink guesser
             br_ []
             button "Start round" [id_ "start-round"] $
               JS.startRound (gameId, phaseNum, roomNum)
-        (Just cr, _) ->
-          div_ [class_ "current-round"] $ do
-            h5_ "Current round"
+          (Just cr, _) -> do
             now <- liftIO getCurrentTime
             div_ [id_ "timer"] $ case cr^.timer of
               TimerPaused t -> do
