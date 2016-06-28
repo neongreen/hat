@@ -506,11 +506,20 @@ setAbsent
   :: Uid Game
   -> Int                    -- ^ Room
   -> Uid User               -- ^ Player
-  -> Bool
+  -> Bool                   -- ^ Absent = 'True'
+  -> UTCTime                -- ^ Current time
   -> Acid.Update GlobalState ()
-setAbsent gameId roomNum playerId val =
-  roomByNum gameId roomNum.absentees %=
-    if val then S.insert playerId else S.delete playerId
+setAbsent gameId roomNum playerId absent now = do
+  let roomLens :: Lens' GlobalState Room
+      roomLens = roomByNum gameId roomNum
+  room <- use roomLens
+  if absent
+    then do
+      roomLens.absentees %= S.insert playerId
+      when (any (== playerId) (room^..currentRound._Just.players.each)) $
+        pauseTimer gameId roomNum True now
+    else do
+      roomLens.absentees %= S.delete playerId
 
 setWords :: Uid Game -> Uid User -> [Text] -> Acid.Update GlobalState ()
 setWords gameId userId ws =

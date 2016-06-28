@@ -572,7 +572,8 @@ roomMethods = do
     (_, _, room) <- getGameCurrentRoom gameId phaseNum roomNum
     when (playerId `notElem` room^.players) $
       fail "the player isn't playing in this room"
-    dbUpdate (SetAbsent gameId roomNum playerId val)
+    now <- liftIO getCurrentTime
+    dbUpdate (SetAbsent gameId roomNum playerId val now)
     db <- _db <$> Spock.getState
     liftIO $ reschedule db gameId roomNum
 
