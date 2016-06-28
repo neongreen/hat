@@ -889,15 +889,17 @@ roomPage gameId phaseNum roomNum = do
                 percent = 100*fromIntegral iLeft/fromIntegral iTotal :: Double
             toHtml $ T.format
               "The schedule is being calculated ({} out of {} iterations,\
-            \ or {}%). It shouldn't take more than 10 seconds. You can\
-            \ refresh the page to see the progress."
+              \ or {}%). It shouldn't take more than 10 seconds. You can\
+              \ refresh the page to see the progress."
               (iLeft, iTotal, T.fixed 0 percent)
           ScheduleDone sch -> do
             ol_ [start_ (T.show (length (room^.pastGames) + 1))] $
               for_ (sch^..each) $ \(namerId, guesserId) -> li_ $ do
                 let Just namer   = find ((== namerId) . view uid) players'
                     Just guesser = find ((== guesserId) . view uid) players'
-                userLink namer >> " plays with " >> userLink guesser
+                let pw = userLink namer >> " plays with " >> userLink guesser
+                if room^?currentRound._Just.players==Just (namerId, guesserId)
+                  then strong_ pw else pw
       -- Current round
       case (room^.currentRound, room^.schedule) of
         (Nothing, ScheduleCalculating{}) -> return ()
