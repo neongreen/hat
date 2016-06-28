@@ -278,6 +278,10 @@ makeFields ''GlobalState
 
 type DB = AcidState GlobalState
 
+roomByNum :: Uid Game -> Int -> Lens' GlobalState Room
+roomByNum gameId num = singular $
+  gameById gameId.currentPhase._Just.rooms.ix (num-1)
+
 hasUid :: HasUid a (Uid u) => Uid u -> a -> Bool
 hasUid u x = x^.uid == u
 
@@ -409,15 +413,13 @@ startRound
   -> UTCTime                -- ^ Current time
   -> Acid.Update GlobalState ()
 startRound gameId roomNum now = do
-  let phaseLens :: Lens' GlobalState Phase
-      phaseLens = singular $ gameById gameId.currentPhase._Just
-      roomLens :: Lens' Phase Room
-      roomLens = singular $ rooms.ix (roomNum-1)
-  phase' <- use phaseLens
-  let room = phase'^.roomLens
+  let roomLens :: Lens' GlobalState Room
+      roomLens = roomByNum gameId roomNum
+  phase' <- use (singular (gameById gameId.currentPhase._Just))
+  room' <- use roomLens
   let timerEnd = fromIntegral (phase'^.timePerRound) `addUTCTime` now
-  phaseLens.roomLens.currentRound .= Just CurrentRound {
-    _currentRoundPlayers = case room^.schedule of
+  roomLens.currentRound .= Just CurrentRound {
+    _currentRoundPlayers = case room'^.schedule of
         ScheduleCalculating{} -> error "startRound: no schedule"
         ScheduleDone [] -> error "startRound: no rounds"
         ScheduleDone (x:_) -> x,
@@ -430,23 +432,13 @@ startRound gameId roomNum now = do
 
 setRoundResults
   :: Uid Game
-  -> Int                    -- ^ Phase
   -> Int                    -- ^ Room
   -> (Uid User, Uid User)   -- ^ Namer, guesser
   -> Round                  -- ^ Round
   -> Acid.Update GlobalState ()
-setRoundResults gameId phaseNum roomNum pls roundRes = do
-  game' <- use (gameById gameId)
-  let phaseLens :: Traversal' Game Phase
-      phaseLens
-        | 1 <= phaseNum && phaseNum <= length (game'^.pastPhases) =
-            pastPhases . ix (phaseNum-1) . _1
-        | phaseNum == length (game'^.pastPhases) + 1 =
-            currentPhase . _Just
-        | otherwise =
-            const pure    -- a traversal that doesn't traverse anything
+setRoundResults gameId roomNum pls roundRes = do
   let roomLens :: Lens' GlobalState Room
-      roomLens = singular $ gameById gameId.phaseLens.rooms.ix (roomNum-1)
+      roomLens = roomByNum gameId roomNum
   old <- roomLens.table.at pls <<.= Just roundRes
   -- Now we have to update 'pastGames' and the schedule
   room <- use roomLens
@@ -482,10 +474,7 @@ updateCurrentRound
   -> Int
   -> Acid.Update GlobalState ()
 updateCurrentRound gameId roomNum scoreD namerPenD guesserPenD discardsD = do
-  let roomLens :: Lens' GlobalState Room
-      roomLens = singular $
-        gameById gameId.currentPhase._Just.rooms.ix (roomNum-1)
-  roomLens.currentRound._Just.roundInfo %=
+  roomByNum gameId roomNum.currentRound._Just.roundInfo %=
     over score          (\x -> max 0 (x+scoreD)) .
     over namerPenalty   (\x -> max 0 (x+namerPenD)) .
     over guesserPenalty (\x -> max 0 (x+guesserPenD)) .
@@ -493,26 +482,13 @@ updateCurrentRound gameId roomNum scoreD namerPenD guesserPenD discardsD = do
 
 setAbsent
   :: Uid Game
-  -> Int                    -- ^ Phase
   -> Int                    -- ^ Room
   -> Uid User               -- ^ Player
   -> Bool
   -> Acid.Update GlobalState ()
-setAbsent gameId phaseNum roomNum playerId val = do
-  game' <- use (gameById gameId)
-  -- TODO: factor this out (it's copied from setRoundResults)
-  let phaseLens :: Traversal' Game Phase
-      phaseLens
-        | 1 <= phaseNum && phaseNum <= length (game'^.pastPhases) =
-            pastPhases . ix (phaseNum-1) . _1
-        | phaseNum == length (game'^.pastPhases) + 1 =
-            currentPhase . _Just
-        | otherwise =
-            const pure    -- a traversal that doesn't traverse anything
-  let roomLens :: Lens' GlobalState Room
-      roomLens = singular $ gameById gameId.phaseLens.rooms.ix (roomNum-1)
-  if val then roomLens.absentees %= S.insert playerId
-         else roomLens.absentees %= S.delete playerId
+setAbsent gameId roomNum playerId val =
+  roomByNum gameId roomNum.absentees %=
+    if val then S.insert playerId else S.delete playerId
 
 setWords :: Uid Game -> Uid User -> [Text] -> Acid.Update GlobalState ()
 setWords gameId userId ws =
@@ -525,10 +501,7 @@ pauseTimer
   -> UTCTime                -- ^ Current time
   -> Acid.Update GlobalState ()
 pauseTimer gameId roomNum pause now = do
-  let roomLens :: Lens' GlobalState Room
-      roomLens = singular $
-        gameById gameId.currentPhase._Just.rooms.ix (roomNum-1)
-  roomLens.currentRound._Just.timer %= \tmr ->
+  roomByNum gameId roomNum.currentRound._Just.timer %= \tmr ->
     case (tmr, pause) of
       (TimerGoing t, True) -> TimerPaused (max 0 (round (diffUTCTime t now)))
       (TimerPaused t, False) -> TimerGoing (fromIntegral t `addUTCTime` now)
@@ -545,8 +518,7 @@ advanceSchedule
   -> Acid.Update GlobalState ()
 advanceSchedule gameId roomNum ps ps' = do
   let roomLens :: Lens' GlobalState Room
-      roomLens = singular $
-        gameById gameId.currentPhase._Just.rooms.ix (roomNum-1)
+      roomLens = roomByNum gameId roomNum
   room <- use roomLens
   roomLens.schedule .= case room^.schedule of
     ScheduleCalculating s
@@ -565,8 +537,7 @@ setPartialSchedule
   -> Acid.Update GlobalState ()
 setPartialSchedule gameId roomNum players' pastGames' sch = do
   let roomLens :: Lens' GlobalState Room
-      roomLens = singular $
-        gameById gameId.currentPhase._Just.rooms.ix (roomNum-1)
+      roomLens = roomByNum gameId roomNum
   room <- use roomLens
   let playerCount = length players'
       roundsLeft = playerCount*(playerCount-1) - length pastGames'

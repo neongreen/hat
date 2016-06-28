@@ -363,9 +363,6 @@ gameMethods = do
   Spock.get (gameVar) $ \gameId ->
     gamePage gameId
 
-  Spock.get (gameVar <//> var <//> var) $ \gameId phaseNum roomNum ->
-    roomPage gameId phaseNum roomNum
-
   Spock.post (gameVar <//> "begin") $ \gameId -> do
     currentAdmin <- isAdmin
     game' <- dbQuery (GetGame gameId)
@@ -520,14 +517,16 @@ gameMethods = do
 
 roomMethods :: SpockM ctx Session ServerState ()
 roomMethods = do
+  Spock.get (gamePhaseRoomVars) $ \gameId phaseNum roomNum ->
+    roomPage gameId phaseNum roomNum
+
   Spock.post (gamePhaseRoomVars <//> roundVars <//> "set") $
     \gameId phaseNum roomNum namerId guesserId -> do
     score'          <- param' "score"
     namerPenalty'   <- abs <$> param' "namer-penalty"
     guesserPenalty' <- abs <$> param' "guesser-penalty"
     discards'       <- abs <$> param' "discards"
-    (_, _, _, room) <-
-      getGamePhaseRoom gameId phaseNum roomNum
+    (_, _, room) <- getGameCurrentRoom gameId phaseNum roomNum
     let res = RoundPlayed RoundInfo {
           _score = score',
           _namerPenalty = namerPenalty',
@@ -539,20 +538,18 @@ roomMethods = do
       fail "the namer isn't playing in this room"
     when (guesserId `notElem` room^.players) $
       fail "the guesser isn't playing in this room"
-    dbUpdate (SetRoundResults gameId phaseNum roomNum (namerId, guesserId) res)
+    dbUpdate (SetRoundResults gameId roomNum (namerId, guesserId) res)
     -- If the schedule is still being computed, we have to restart computing
     -- it (but if the schedule was complete, it's been updated by
     -- SetRoundResults)
     db <- _db <$> Spock.getState
-    -- TODO: only do this if the phase is the current phase
     case room^.schedule of
       ScheduleDone{} -> return ()
       ScheduleCalculating{} -> liftIO $ reschedule db gameId roomNum
 
   Spock.post (gamePhaseRoomVars <//> roundVars <//> "clear") $
     \gameId phaseNum roomNum namerId guesserId -> do
-    (_, _, _, room) <-
-      getGamePhaseRoom gameId phaseNum roomNum
+    (_, _, room) <- getGameCurrentRoom gameId phaseNum roomNum
     let res = RoundNotYetPlayed
     when (namerId == guesserId) $
       fail "a player can't play with themself"
@@ -560,12 +557,11 @@ roomMethods = do
       fail "the namer isn't playing in this room"
     when (guesserId `notElem` room^.players) $
       fail "the guesser isn't playing in this room"
-    dbUpdate (SetRoundResults gameId phaseNum roomNum (namerId, guesserId) res)
+    dbUpdate (SetRoundResults gameId roomNum (namerId, guesserId) res)
     -- If the schedule is still being computed, we have to restart computing
     -- it (but if the schedule was complete, it's been updated by
     -- SetRoundResults)
     db <- _db <$> Spock.getState
-    -- TODO: only do this if the phase is the current phase
     case room^.schedule of
       ScheduleDone{} -> return ()
       ScheduleCalculating{} -> liftIO $ reschedule db gameId roomNum
@@ -573,20 +569,16 @@ roomMethods = do
   Spock.post (gamePhaseRoomVars <//> "player" <//> var <//> "absent") $
     \gameId phaseNum roomNum playerId -> do
     val <- (== ("true" :: Text)) <$> param' "val"
-    (_, _, _, room) <-
-      getGamePhaseRoom gameId phaseNum roomNum
+    (_, _, room) <- getGameCurrentRoom gameId phaseNum roomNum
     when (playerId `notElem` room^.players) $
       fail "the player isn't playing in this room"
-    dbUpdate (SetAbsent gameId phaseNum roomNum playerId val)
+    dbUpdate (SetAbsent gameId roomNum playerId val)
     db <- _db <$> Spock.getState
-    -- TODO: only do this if the phase is the current phase
     liftIO $ reschedule db gameId roomNum
 
-  -- TODO: this should only work on current phase
   Spock.post (gamePhaseRoomVars <//> "start-round") $
     \gameId phaseNum roomNum -> do
-    (_, _, _, room) <-
-      getGamePhaseRoom gameId phaseNum roomNum
+    (_, _, room) <- getGameCurrentRoom gameId phaseNum roomNum
     case (room^.currentRound, room^.schedule) of
       (Just _, _) ->
         fail "there's already a round in progress"
@@ -598,9 +590,9 @@ roomMethods = do
         now <- liftIO getCurrentTime
         dbUpdate (StartRound gameId roomNum now)
 
-  -- TODO: this should only work on current phase
   Spock.post (gamePhaseRoomVars <//> "change-current-round") $
     \gameId phaseNum roomNum -> do
+    (_, _, _) <- getGameCurrentRoom gameId phaseNum roomNum
     scoreDelta <- param' "score"
     discardsDelta <- param' "discards"
     namerPenaltyDelta <- param' "namer-penalty"
@@ -609,9 +601,9 @@ roomMethods = do
       UpdateCurrentRound gameId roomNum
         scoreDelta namerPenaltyDelta guesserPenaltyDelta discardsDelta
 
-  -- TODO: this should only work on current phase
   Spock.post (gamePhaseRoomVars <//> "pause-timer") $
     \gameId phaseNum roomNum -> do
+    (_, _, _) <- getGameCurrentRoom gameId phaseNum roomNum
     pause <- (== ("true" :: Text)) <$> param' "pause"
     now <- liftIO getCurrentTime
     dbUpdate (PauseTimer gameId roomNum pause now)
@@ -795,6 +787,8 @@ roomPage gameId phaseNum roomNum = do
     h2_ $ do
       mkLink (toHtml (game'^.title)) (T.format "/game/{}" [game'^.uid])
       toHtml $ T.format ": phase #{}, room #{}" (phaseNum, roomNum)
+
+-- TODO: show page differently if not current phase
 
     -- Helper: round table cell
     let roundCell px py = do
@@ -995,6 +989,27 @@ getGamePhaseRoom gameId phaseNum roomNum = do
       Spock.text "No room with such number"
     Just room -> return room
   return (game', phase', mbRes, room)
+
+getGameCurrentRoom
+  :: (MonadIO m, HasSpock (ActionCtxT ctx m),
+      SpockState (ActionCtxT ctx m) ~ ServerState)
+  => Uid Game -> Int -> Int
+  -> ActionCtxT ctx m (Game, Phase, Room)
+getGameCurrentRoom gameId phaseNum roomNum = do
+  game' <- dbQuery (GetGame gameId)
+  phase' <- case game'^.currentPhase of
+    Nothing -> do
+      setStatus status404
+      Spock.text "No current phase"
+    Just p -> return p
+  when (length (game'^.pastPhases) + 1 /= phaseNum) $
+    fail "not the current phase"
+  room <- case phase'^?rooms.ix (roomNum-1) of
+    Nothing -> do
+      setStatus status404
+      Spock.text "No room with such number"
+    Just room -> return room
+  return (game', phase', room)
 
 userMethods :: SpockM ctx Session ServerState ()
 userMethods = do
