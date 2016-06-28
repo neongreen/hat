@@ -97,6 +97,8 @@ module DB
   SetGameCurrentPhase(..),
   StartRound(..),
   SetRoundResults(..),
+  CancelCurrentRound(..),
+  FinishCurrentRound(..),
   UpdateCurrentRound(..),
   SetAbsent(..),
   SetWords(..),
@@ -465,6 +467,26 @@ setRoundResults gameId roomNum pls roundRes = do
       roomLens.pastGames %= delete pls
     _other -> return ()
 
+cancelCurrentRound
+  :: Uid Game
+  -> Int
+  -> Acid.Update GlobalState ()
+cancelCurrentRound gameId roomNum = do
+  roomByNum gameId roomNum.currentRound .= Nothing
+
+finishCurrentRound
+  :: Uid Game
+  -> Int
+  -> Acid.Update GlobalState ()
+finishCurrentRound gameId roomNum = do
+  mbCr <- use (roomByNum gameId roomNum.currentRound)
+  case mbCr of
+    Nothing -> return ()
+    Just cr -> do
+      setRoundResults gameId roomNum (cr^.players)
+        (RoundPlayed (cr^.roundInfo))
+      roomByNum gameId roomNum.currentRound .= Nothing
+
 updateCurrentRound
   :: Uid Game
   -> Int
@@ -578,6 +600,8 @@ makeAcidic ''GlobalState [
   'setAbsent,
   'setWords,
   'pauseTimer,
+  'cancelCurrentRound,
+  'finishCurrentRound,
   'updateCurrentRound,
   'advanceSchedule,
   'setPartialSchedule,

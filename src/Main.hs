@@ -608,6 +608,16 @@ roomMethods = do
     now <- liftIO getCurrentTime
     dbUpdate (PauseTimer gameId roomNum pause now)
 
+  Spock.post (gamePhaseRoomVars <//> "cancel-current-round") $
+    \gameId phaseNum roomNum -> do
+    (_, _, _) <- getGameCurrentRoom gameId phaseNum roomNum
+    dbUpdate (CancelCurrentRound gameId roomNum)
+
+  Spock.post (gamePhaseRoomVars <//> "finish-current-round") $
+    \gameId phaseNum roomNum -> do
+    (_, _, _) <- getGameCurrentRoom gameId phaseNum roomNum
+    dbUpdate (FinishCurrentRound gameId roomNum)
+
 gamePage
   :: Uid Game
   -> SpockActionCtx ctx conn Session ServerState ()
@@ -962,6 +972,11 @@ roomPage gameId phaseNum roomNum = do
                      JS.selectUid spanId, "guesser-penalty" :: Text,  1 :: Int)
                   "Guesser penalty: "
                   span_ [uid_ spanId] (toHtml (T.show _guesserPenalty))
+            div_ [id_ "round-control-buttons"] $ do
+              button "Cancel round" [] $
+                JS.cancelCurrentRound (gameId, phaseNum, roomNum)
+              button "Finish round" [] $
+                JS.finishCurrentRound (gameId, phaseNum, roomNum)
 
 getGamePhaseRoom
   :: (MonadIO m, HasSpock (ActionCtxT ctx m),

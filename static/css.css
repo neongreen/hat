@@ -218,7 +218,7 @@ textarea.fullwidth {
 
 .future-rounds ol {
   max-width: 500px;
-  max-height: 200px;
+  max-height: 244px;
   overflow:auto;
   margin: auto;
 }
@@ -305,4 +305,14 @@ textarea.fullwidth {
 }
 .round-stuff .penalties div :nth-child(2) {
   margin-right: 0.5em;
+}
+
+#round-control-buttons {
+  display: flex;
+  margin: 0 -2.5px;
+  margin-top: 1em;
+}
+#round-control-buttons button {
+  flex: 1;
+  margin: 0 2.5px;
 }

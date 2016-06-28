@@ -52,6 +52,8 @@ allJSFunctions = JS . T.unlines . map fromJS $ [
   beginNextPhase,
   setAbsent,
   startRound,
+  cancelCurrentRound,
+  finishCurrentRound,
   changeCurrentRound,
   recalcTime,
   keepTimer,
@@ -518,6 +520,28 @@ startRound =
   makeJSFunction "startRound" ["gameId", "phaseNum", "roomNum"]
   [text|
     $.post("/game/" + gameId + "/" + phaseNum + "/" + roomNum + "/start-round")
+     .done(function () {
+        location.reload();
+     });
+  |]
+
+cancelCurrentRound :: JSFunction a => a
+cancelCurrentRound =
+  makeJSFunction "cancelCurrentRound" ["gameId", "phaseNum", "roomNum"]
+  [text|
+    $.post("/game/" + gameId + "/" + phaseNum + "/" + roomNum +
+           "/cancel-current-round")
+     .done(function () {
+        location.reload();
+     });
+  |]
+
+finishCurrentRound :: JSFunction a => a
+finishCurrentRound =
+  makeJSFunction "finishCurrentRound" ["gameId", "phaseNum", "roomNum"]
+  [text|
+    $.post("/game/" + gameId + "/" + phaseNum + "/" + roomNum +
+           "/finish-current-round")
      .done(function () {
         location.reload();
      });
