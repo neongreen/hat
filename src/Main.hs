@@ -1,5 +1,6 @@
 {-# LANGUAGE
 OverloadedStrings,
+RecordWildCards,
 DataKinds,
 QuasiQuotes,
 TypeFamilies,
@@ -527,11 +528,11 @@ roomMethods = do
     discards'       <- abs <$> param' "discards"
     (_, _, _, room) <-
       getGamePhaseRoom gameId phaseNum roomNum
-    let res = RoundPlayed {
-          _roundScore = score',
-          _roundNamerPenalty = namerPenalty',
-          _roundGuesserPenalty = guesserPenalty',
-          _roundDiscards = discards' }
+    let res = RoundPlayed RoundInfo {
+          _score = score',
+          _namerPenalty = namerPenalty',
+          _guesserPenalty = guesserPenalty',
+          _discards = discards' }
     when (namerId == guesserId) $
       fail "a player can't play with themself"
     when (namerId `notElem` room^.players) $
@@ -596,6 +597,17 @@ roomMethods = do
       (Nothing, ScheduleDone _) -> do
         now <- liftIO getCurrentTime
         dbUpdate (StartRound gameId roomNum now)
+
+  -- TODO: this should only work on current phase
+  Spock.post (gamePhaseRoomVars <//> "change-current-round") $
+    \gameId phaseNum roomNum -> do
+    scoreDelta <- param' "score"
+    discardsDelta <- param' "discards"
+    namerPenaltyDelta <- param' "namer-penalty"
+    guesserPenaltyDelta <- param' "guesser-penalty"
+    dbUpdate $
+      UpdateCurrentRound gameId roomNum
+        scoreDelta namerPenaltyDelta guesserPenaltyDelta discardsDelta
 
 gamePage
   :: Uid Game
@@ -783,21 +795,21 @@ roomPage gameId phaseNum roomNum = do
           let handler = JS.showRoundEditPopup
                           (gameId, phaseNum, roomNum,
                            py^.uid, px^.uid,
-                           fromMaybe 0 (roundRes^?score),
-                           fromMaybe 0 (roundRes^?namerPenalty),
-                           fromMaybe 0 (roundRes^?guesserPenalty),
-                           fromMaybe 0 (roundRes^?discards))
+                           fromMaybe 0 (roundRes^?mbInfo.score),
+                           fromMaybe 0 (roundRes^?mbInfo.namerPenalty),
+                           fromMaybe 0 (roundRes^?mbInfo.guesserPenalty),
+                           fromMaybe 0 (roundRes^?mbInfo.discards))
           case roundRes of
             RoundNotYetPlayed ->
               td_ [onClick handler, class_ "not-yet-played"] ""
-            RoundPlayed score' namerPenalty' guesserPenalty' discards' ->
+            RoundPlayed (RoundInfo score' namerPen' guesserPen' discards') ->
               td_ [onClick handler, class_ "played"] $ div_ $ do
-                when (namerPenalty' + discards' /= 0) $
+                when (namerPen' + discards' /= 0) $
                   span_ [class_ "namer-penalty"] $
-                    toHtml ("−" <> T.show (namerPenalty' + discards'))
-                when (guesserPenalty' /= 0) $
+                    toHtml ("−" <> T.show (namerPen' + discards'))
+                when (guesserPen' /= 0) $
                   span_ [class_ "guesser-penalty"] $
-                    toHtml ("−" <> T.show guesserPenalty')
+                    toHtml ("−" <> T.show guesserPen')
                 span_ [class_ "score"] $
                   toHtml (T.show score')
             RoundImpossible ->
@@ -809,19 +821,19 @@ roomPage gameId phaseNum roomNum = do
           for_ players' $ \p -> do
             let penalty = sum . catMaybes $ do
                   ((a, b), r) <- M.toList (room^.table)
-                  [guard (p^.uid == a) *> r^?discards,
-                   guard (p^.uid == a) *> r^?namerPenalty,
-                   guard (p^.uid == b) *> r^?guesserPenalty ]
+                  [guard (p^.uid == a) *> r^?mbInfo.discards,
+                   guard (p^.uid == a) *> r^?mbInfo.namerPenalty,
+                   guard (p^.uid == b) *> r^?mbInfo.guesserPenalty ]
             td_ $ when (penalty /= 0) $ toHtml ("−" <> T.show penalty)
     let totalsRow = tr_ [class_ "totals"] $ do
           td_ "Total"
           for_ players' $ \p -> do
             let total = sum . catMaybes $ do
                   ((a, b), r) <- M.toList (room^.table)
-                  [guard (p^.uid == a)         *> r^?discards.to negate,
-                   guard (p^.uid == a)         *> r^?namerPenalty.to negate,
-                   guard (p^.uid == b)         *> r^?guesserPenalty.to negate,
-                   guard (p^.uid `elem` [a,b]) *> r^?score ]
+                  [guard (p^.uid == a) *> r^?mbInfo.discards.to negate,
+                   guard (p^.uid == a) *> r^?mbInfo.namerPenalty.to negate,
+                   guard (p^.uid == b) *> r^?mbInfo.guesserPenalty.to negate,
+                   guard (p^.uid `elem` [a,b]) *> r^?mbInfo.score ]
             td_ $ toHtml (T.show total)
 
     -- Actually generate the table
@@ -885,8 +897,10 @@ roomPage gameId phaseNum roomNum = do
             h5_ "Current round"
             let Just namer = find ((== namerId) . view uid) players'
                 Just guesser = find ((== guesserId) . view uid) players'
-            span_ $ userLink namer >> " plays with " >> userLink guesser
-            button "Start round" [] $
+            span_ [id_ "who-plays-with-who"] $
+              userLink namer >> " plays with " >> userLink guesser
+            br_ []
+            button "Start round" [id_ "start-round"] $
               JS.startRound (gameId, phaseNum, roomNum)
         (Just cr, _) ->
           div_ [class_ "current-round"] $ do
@@ -899,6 +913,49 @@ roomPage gameId phaseNum roomNum = do
                 let d = max 0 (round (diffUTCTime t now) :: Int)
                 onPageLoad $ JS.keepTimer (JS.selectId "timer-num", d)
                 span_ [id_ "timer-num"] ""
+            div_ [class_ "round-stuff"] $ do
+              let RoundInfo{..} = cr^.roundInfo
+              div_ [class_ "score"] $ do
+                spanId <- randomLongUid
+                button "−" [] $ JS.changeCurrentRound
+                  (gameId, phaseNum, roomNum,
+                   JS.selectUid spanId, "score" :: Text, -1 :: Int)
+                button "+" [] $ JS.changeCurrentRound
+                  (gameId, phaseNum, roomNum,
+                   JS.selectUid spanId, "score" :: Text,  1 :: Int)
+                "Words: "
+                span_ [uid_ spanId] (toHtml (T.show _score))
+              div_ [class_ "penalties"] $ do
+                div_ $ do
+                  spanId <- randomLongUid
+                  button "−" [] $ JS.changeCurrentRound
+                    (gameId, phaseNum, roomNum,
+                     JS.selectUid spanId, "discards" :: Text, -1 :: Int)
+                  button "+" [] $ JS.changeCurrentRound
+                    (gameId, phaseNum, roomNum,
+                     JS.selectUid spanId, "discards" :: Text,  1 :: Int)
+                  "Discards: "
+                  span_ [uid_ spanId] (toHtml (T.show _discards))
+                div_ $ do
+                  spanId <- randomLongUid
+                  button "−" [] $ JS.changeCurrentRound
+                    (gameId, phaseNum, roomNum,
+                     JS.selectUid spanId, "namer-penalty" :: Text, -1 :: Int)
+                  button "+" [] $ JS.changeCurrentRound
+                    (gameId, phaseNum, roomNum,
+                     JS.selectUid spanId, "namer-penalty" :: Text,  1 :: Int)
+                  "Namer penalty: "
+                  span_ [uid_ spanId] (toHtml (T.show _namerPenalty))
+                div_ $ do
+                  spanId <- randomLongUid
+                  button "−" [] $ JS.changeCurrentRound
+                    (gameId, phaseNum, roomNum,
+                     JS.selectUid spanId, "guesser-penalty" :: Text, -1 :: Int)
+                  button "+" [] $ JS.changeCurrentRound
+                    (gameId, phaseNum, roomNum,
+                     JS.selectUid spanId, "guesser-penalty" :: Text,  1 :: Int)
+                  "Guesser penalty: "
+                  span_ [uid_ spanId] (toHtml (T.show _guesserPenalty))
 
 getGamePhaseRoom
   :: (MonadIO m, HasSpock (ActionCtxT ctx m),

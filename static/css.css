@@ -248,6 +248,53 @@ textarea.fullwidth {
 }
 
 #timer-num {
-  font-size: 1.5em;
+  font-size: 2.5em;
   font-weight: bold;
+  display: block;
+  text-align: center;
+  margin-top: 0.7em;
+  margin-bottom: 0.7em;
+}
+
+#who-plays-with-who {
+  font-size: 1.3em;
+  display: block;
+  text-align: center;
+}
+
+#start-round {
+  width: 100%;
+}
+
+.round-stuff .penalties {
+  margin-top: 0.8em;
+}
+
+.round-stuff button {
+  border-color: gray;
+  background-color: gray;
+  min-width: 2em;
+  font-size: 1.2em;
+  height: 2.4rem;
+  line-height: inherit;
+  padding: 0 1rem;
+  margin: 3px 1px;
+}
+
+.round-stuff button:hover {
+  border-color: lightgray;
+  background-color: lightgray;
+}
+
+.round-stuff span {
+  font-weight: bold;
+  font-size: 1.2em;
+  vertical-align: -1px;
+}
+
+.round-stuff .score :nth-child(2) {
+  margin-right: 0.5em;
+}
+.round-stuff .penalties div :nth-child(2) {
+  margin-right: 0.5em;
 }

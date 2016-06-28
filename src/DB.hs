@@ -43,6 +43,8 @@ module DB
   PhaseResults(..),
     winners,
   Round(..),
+    mbInfo,
+  RoundInfo(..),
     score,
     namerPenalty,
     guesserPenalty,
@@ -51,6 +53,7 @@ module DB
   Timer(..),
   CurrentRound(..),
     timer,
+    roundInfo,
   Room(..),
     currentRound,
     absentees,
@@ -94,6 +97,7 @@ module DB
   SetGameCurrentPhase(..),
   StartRound(..),
   SetRoundResults(..),
+  UpdateCurrentRound(..),
   SetAbsent(..),
   SetWords(..),
   AdvanceSchedule(..),
@@ -157,13 +161,16 @@ data WordReq = WordReq {
   _wordReqPerUser :: Int }
   deriving (Show)
 
+data RoundInfo = RoundInfo {
+  _score          :: Int,
+  _namerPenalty   :: Int,
+  _guesserPenalty :: Int,
+  _discards       :: Int }
+  deriving (Show)
+
 data Round
   = RoundNotYetPlayed
-  | RoundPlayed {
-      _roundScore          :: Int,
-      _roundNamerPenalty   :: Int,
-      _roundGuesserPenalty :: Int,
-      _roundDiscards       :: Int }
+  | RoundPlayed {_roundMbInfo :: RoundInfo}
   | RoundImpossible            -- e.g. the user can't play against themself
   deriving (Show)
 
@@ -184,10 +191,7 @@ data PhaseResults = Results {
 
 data CurrentRound = CurrentRound {
   _currentRoundPlayers :: (Uid User, Uid User),
-  _currentRoundScore :: Int,
-  _currentRoundNamerPenalty :: Int,
-  _currentRoundGuesserPenalty :: Int,
-  _currentRoundDiscards :: Int,
+  _currentRoundRoundInfo :: RoundInfo,
   _currentRoundTimer :: Timer }
   deriving (Show)
 
@@ -226,24 +230,26 @@ data Game = Game {
 
 deriveSafeCopySimple 0 'base ''User
 deriveSafeCopySimple 0 'base ''WordReq
-deriveSafeCopySimple 0 'base ''Round
 deriveSafeCopySimple 0 'base ''ScheduleStatus
 deriveSafeCopySimple 0 'base ''Phase
 deriveSafeCopySimple 0 'base ''PhaseResults
 deriveSafeCopySimple 0 'base ''Timer
 deriveSafeCopySimple 0 'base ''CurrentRound
+deriveSafeCopySimple 0 'base ''RoundInfo
+deriveSafeCopySimple 0 'base ''Round
 deriveSafeCopySimple 0 'base ''Room
 deriveSafeCopySimple 0 'base ''Game
 
 makeFields ''User
 makeFields ''WordReq
-makeFields ''Round
 makeFields ''ScheduleStatus
 makeFields ''Phase
 makeFields ''PhaseResults
 makeFields ''CurrentRound
 makeFields ''Room
+makeFields ''Round
 makeFields ''Game
+makeLenses ''RoundInfo
 
 remainingPlayers :: SimpleGetter Room [Uid User]
 remainingPlayers = to $ \room -> room^.players \\ S.toList (room^.absentees)
@@ -414,10 +420,11 @@ startRound gameId roomNum now = do
         ScheduleCalculating{} -> error "startRound: no schedule"
         ScheduleDone [] -> error "startRound: no rounds"
         ScheduleDone (x:_) -> x,
-    _currentRoundScore = 0,
-    _currentRoundNamerPenalty = 0,
-    _currentRoundGuesserPenalty = 0,
-    _currentRoundDiscards = 0,
+    _currentRoundRoundInfo = RoundInfo {
+        _score = 0,
+        _namerPenalty = 0,
+        _guesserPenalty = 0,
+        _discards = 0 },
     _currentRoundTimer = TimerGoing timerEnd }
 
 setRoundResults
@@ -464,6 +471,24 @@ setRoundResults gameId phaseNum roomNum pls roundRes = do
     (RoundPlayed{}, RoundImpossible) ->
       roomLens.pastGames %= delete pls
     _other -> return ()
+
+updateCurrentRound
+  :: Uid Game
+  -> Int
+  -> Int
+  -> Int
+  -> Int
+  -> Int
+  -> Acid.Update GlobalState ()
+updateCurrentRound gameId roomNum scoreD namerPenD guesserPenD discardsD = do
+  let roomLens :: Lens' GlobalState Room
+      roomLens = singular $
+        gameById gameId.currentPhase._Just.rooms.ix (roomNum-1)
+  roomLens.currentRound._Just.roundInfo %=
+    over score          (\x -> max 0 (x+scoreD)) .
+    over namerPenalty   (\x -> max 0 (x+namerPenD)) .
+    over guesserPenalty (\x -> max 0 (x+guesserPenD)) .
+    over discards       (\x -> max 0 (x+discardsD))
 
 setAbsent
   :: Uid Game
@@ -564,6 +589,7 @@ makeAcidic ''GlobalState [
   'setRoundResults,
   'setAbsent,
   'setWords,
+  'updateCurrentRound,
   'advanceSchedule,
   'setPartialSchedule,
   'setDirty, 'unsetDirty

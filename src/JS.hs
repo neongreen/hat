@@ -52,6 +52,7 @@ allJSFunctions = JS . T.unlines . map fromJS $ [
   beginNextPhase,
   setAbsent,
   startRound,
+  changeCurrentRound,
   recalcTime,
   keepTimer,
   makeAdmin ]
@@ -340,7 +341,7 @@ showRoundEditPopup =
 
     labelScore = $("<label>", {
       "for"  : "score",
-      "text" : "Score" })[0];
+      "text" : "Words" })[0];
     inputScore = $("<input>", {
       "name"  : "score",
       "type"  : "number",
@@ -518,6 +519,26 @@ startRound =
     $.post("/game/" + gameId + "/" + phaseNum + "/" + roomNum + "/start-round")
      .done(function () {
         location.reload();
+     });
+  |]
+
+changeCurrentRound :: JSFunction a => a
+changeCurrentRound =
+  makeJSFunction "changeCurrentRound"
+                 ["gameId", "phaseNum", "roomNum",
+                  "numNode", "parameter", "delta"]
+  [text|
+    obj = {
+       "score": 0,
+       "discards": 0,
+       "namer-penalty": 0,
+       "guesser-penalty": 0 };
+    obj[parameter] = delta;
+    $.post("/game/" + gameId + "/" + phaseNum + "/" + roomNum +
+           "/change-current-round", obj)
+     .done(function () {
+        prevNum = parseInt($(numNode).text(), 10);
+        $(numNode).text(Math.max(0, prevNum + delta));
      });
   |]
 
