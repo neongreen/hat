@@ -100,6 +100,7 @@ module DB
   UpdateCurrentRound(..),
   SetAbsent(..),
   SetWords(..),
+  PauseTimer(..),
   AdvanceSchedule(..),
   SetDirty(..), UnsetDirty(..),
 )
@@ -517,6 +518,22 @@ setWords :: Uid Game -> Uid User -> [Text] -> Acid.Update GlobalState ()
 setWords gameId userId ws =
   gameById gameId.wordReq._Just.submitted.at userId .= Just (S.fromList ws)
 
+pauseTimer
+  :: Uid Game
+  -> Int
+  -> Bool
+  -> UTCTime                -- ^ Current time
+  -> Acid.Update GlobalState ()
+pauseTimer gameId roomNum pause now = do
+  let roomLens :: Lens' GlobalState Room
+      roomLens = singular $
+        gameById gameId.currentPhase._Just.rooms.ix (roomNum-1)
+  roomLens.currentRound._Just.timer %= \tmr ->
+    case (tmr, pause) of
+      (TimerGoing t, True) -> TimerPaused (max 0 (round (diffUTCTime t now)))
+      (TimerPaused t, False) -> TimerGoing (fromIntegral t `addUTCTime` now)
+      _ -> tmr
+
 mkSchedule :: [Uid User] -> Schedule -> [(Uid User, Uid User)]
 mkSchedule players' sch = U.toList sch & each.each %~ (players'!!)
 
@@ -589,6 +606,7 @@ makeAcidic ''GlobalState [
   'setRoundResults,
   'setAbsent,
   'setWords,
+  'pauseTimer,
   'updateCurrentRound,
   'advanceSchedule,
   'setPartialSchedule,

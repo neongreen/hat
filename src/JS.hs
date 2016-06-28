@@ -55,6 +55,7 @@ allJSFunctions = JS . T.unlines . map fromJS $ [
   changeCurrentRound,
   recalcTime,
   keepTimer,
+  pauseTimer,
   makeAdmin ]
 
 -- | A class for things that can be converted to Javascript syntax.
@@ -566,6 +567,17 @@ keepTimer =
       }
       $(timerNode).text(m+":"+("00"+s).slice(-2));
     }, 1000);
+  |]
+
+pauseTimer :: JSFunction a => a
+pauseTimer =
+  makeJSFunction "pauseTimer" ["gameId", "phaseNum", "roomNum", "pause"]
+  [text|
+    $.post("/game/" + gameId + "/" + phaseNum + "/" + roomNum + "/pause-timer",
+           {pause: pause})
+     .done(function () {
+        location.reload();
+     });
   |]
 
 -- When adding a function, don't forget to add it to 'allJSFunctions'!

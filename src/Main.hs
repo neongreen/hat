@@ -609,6 +609,13 @@ roomMethods = do
       UpdateCurrentRound gameId roomNum
         scoreDelta namerPenaltyDelta guesserPenaltyDelta discardsDelta
 
+  -- TODO: this should only work on current phase
+  Spock.post (gamePhaseRoomVars <//> "pause-timer") $
+    \gameId phaseNum roomNum -> do
+    pause <- (== ("true" :: Text)) <$> param' "pause"
+    now <- liftIO getCurrentTime
+    dbUpdate (PauseTimer gameId roomNum pause now)
+
 gamePage
   :: Uid Game
   -> SpockActionCtx ctx conn Session ServerState ()
@@ -906,13 +913,18 @@ roomPage gameId phaseNum roomNum = do
           div_ [class_ "current-round"] $ do
             h5_ "Current round"
             now <- liftIO getCurrentTime
-            case cr^.timer of
-              TimerPaused t ->
-                span_ [id_ "timer-num"] $ toHtml (T.show t)
+            div_ [id_ "timer"] $ case cr^.timer of
+              TimerPaused t -> do
+                span_ [id_ "timer-num"] $ toHtml $
+                  T.format "{}:{}" (t `div` 60, T.left 2 '0' (t `mod` 60))
+                imgButton "unpause" "/media-play.svg" [] $
+                  JS.pauseTimer (gameId, phaseNum, roomNum, False)
               TimerGoing t -> do
                 let d = max 0 (round (diffUTCTime t now) :: Int)
                 onPageLoad $ JS.keepTimer (JS.selectId "timer-num", d)
                 span_ [id_ "timer-num"] ""
+                imgButton "pause" "/media-pause.svg" [] $
+                  JS.pauseTimer (gameId, phaseNum, roomNum, True)
             div_ [class_ "round-stuff"] $ do
               let RoundInfo{..} = cr^.roundInfo
               div_ [class_ "score"] $ do
