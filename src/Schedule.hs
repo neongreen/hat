@@ -190,7 +190,22 @@ swap2 xs = do
 precomputedSchedules :: Map Int [U.Vector (Int, Int)]
 precomputedSchedules =
   over (each.each) U.fromList $
-  M.fromList $ zip [4..7] [schedule4, schedule5, schedule6, schedule7]
+  M.fromList $ zip [1..7]
+    [schedule1, schedule2, schedule3, schedule4,
+     schedule5, schedule6, schedule7]
+
+schedule1 :: [[(Int, Int)]]
+schedule1 = [[]]
+
+schedule2 :: [[(Int, Int)]]
+schedule2 = [
+  [(0,1),(1,0)],
+  [(1,0),(0,1)] ]
+
+schedule3 :: [[(Int, Int)]]
+schedule3 = [
+  [(0,1),(2,0),(1,2),(0,2),(1,0),(2,1)],
+  [(2,1),(1,0),(0,2),(1,2),(2,0),(0,1)] ]
 
 schedule4 :: [[(Int, Int)]]
 schedule4 = [
