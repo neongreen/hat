@@ -40,8 +40,6 @@ module DB
     currentPhase,
   Phase(..),
     timePerRound,
-  PhaseResults(..),
-    winners,
   Round(..),
     mbInfo,
   RoundInfo(..),
@@ -55,6 +53,7 @@ module DB
     timer,
     roundInfo,
   Room(..),
+    winners,
     currentRound,
     absentees,
     remainingPlayers,
@@ -101,6 +100,7 @@ module DB
   FinishCurrentRound(..),
   UpdateCurrentRound(..),
   SetAbsent(..),
+  SetWinner(..),
   SetWords(..),
   PauseTimer(..),
   AdvanceSchedule(..),
@@ -188,10 +188,6 @@ data Phase = Phase {
   _phaseRooms :: [Room] }
   deriving (Show)
 
-data PhaseResults = Results {
-  _phaseResultsWinners :: [[Uid User]] }
-  deriving (Show)
-
 data CurrentRound = CurrentRound {
   _currentRoundPlayers :: (Uid User, Uid User),
   _currentRoundRoundInfo :: RoundInfo,
@@ -207,6 +203,7 @@ data Room = Room {
   _roomCurrentRound :: Maybe CurrentRound,
   _roomPlayers :: [Uid User],
   _roomAbsentees :: Set (Uid User),
+  _roomWinners :: Set (Uid User),
   -- namer, guesser
   _roomTable :: Map (Uid User, Uid User) Round,
   -- | History of past games. Might be inaccunrate because of manual editing,
@@ -227,7 +224,7 @@ data Game = Game {
   _gamePlayers :: Set (Uid User),
   -- | A generated division of players into groups
   _gameGroups :: Maybe [[Uid User]],
-  _gamePastPhases :: [(Phase, PhaseResults)],
+  _gamePastPhases :: [Phase],
   _gameCurrentPhase :: Maybe Phase }
   deriving (Show)
 
@@ -235,7 +232,6 @@ deriveSafeCopySimple 0 'base ''User
 deriveSafeCopySimple 0 'base ''WordReq
 deriveSafeCopySimple 0 'base ''ScheduleStatus
 deriveSafeCopySimple 0 'base ''Phase
-deriveSafeCopySimple 0 'base ''PhaseResults
 deriveSafeCopySimple 0 'base ''Timer
 deriveSafeCopySimple 0 'base ''CurrentRound
 deriveSafeCopySimple 0 'base ''RoundInfo
@@ -247,7 +243,6 @@ makeFields ''User
 makeFields ''WordReq
 makeFields ''ScheduleStatus
 makeFields ''Phase
-makeFields ''PhaseResults
 makeFields ''CurrentRound
 makeFields ''Room
 makeFields ''Round
@@ -392,7 +387,7 @@ addGame uid' title' createdBy' wordReq' registerUntil' players' = do
         _gameEnded = False,
         _gamePlayers = players',
         _gameGroups = Nothing,
-        _gamePastPhases = mempty,
+        _gamePastPhases = [],
         _gameCurrentPhase = Nothing }
   games %= (game':)
   return game'
@@ -521,6 +516,18 @@ setAbsent gameId roomNum playerId absent now = do
     else do
       roomLens.absentees %= S.delete playerId
 
+setWinner
+  :: Uid Game
+  -> Int                    -- ^ Room
+  -> Uid User               -- ^ Player
+  -> Bool                   -- ^ Winner = 'True'
+  -> Acid.Update GlobalState ()
+setWinner gameId roomNum playerId winner = do
+  let roomLens :: Lens' GlobalState Room
+      roomLens = roomByNum gameId roomNum
+  if winner then roomLens.winners %= S.insert playerId
+            else roomLens.winners %= S.delete playerId
+
 setWords :: Uid Game -> Uid User -> [Text] -> Acid.Update GlobalState ()
 setWords gameId userId ws =
   gameById gameId.wordReq._Just.submitted.at userId .= Just (S.fromList ws)
@@ -607,6 +614,7 @@ makeAcidic ''GlobalState [
   'startRound,
   'setRoundResults,
   'setAbsent,
+  'setWinner,
   'setWords,
   'pauseTimer,
   'cancelCurrentRound,

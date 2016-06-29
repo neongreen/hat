@@ -397,6 +397,7 @@ gameMethods = do
             _roomCurrentRound = Nothing,
             _roomPlayers = gr,
             _roomAbsentees = mempty,
+            _roomWinners = mempty,
             _roomTable = M.fromList [
                 ((a, b), if a==b then RoundImpossible else RoundNotYetPlayed)
                 | a <- gr, b <- gr ],
@@ -577,6 +578,14 @@ roomMethods = do
     db <- _db <$> Spock.getState
     liftIO $ reschedule db gameId roomNum
 
+  Spock.post (gamePhaseRoomVars <//> "player" <//> var <//> "winner") $
+    \gameId phaseNum roomNum playerId -> do
+    val <- (== ("true" :: Text)) <$> param' "val"
+    (_, _, room) <- getGameCurrentRoom gameId phaseNum roomNum
+    when (playerId `notElem` room^.players) $
+      fail "the player isn't playing in this room"
+    dbUpdate (SetWinner gameId roomNum playerId val)
+
   Spock.post (gamePhaseRoomVars <//> "start-round") $
     \gameId phaseNum roomNum -> do
     (_, _, room) <- getGameCurrentRoom gameId phaseNum roomNum
@@ -718,7 +727,7 @@ gamePage gameId = do
         -- show past phases
         ifor_ (game'^.pastPhases) $ \i p -> do
           h4_ $ toHtml $ T.format "Phase {}" [i+1]
-          let roomCount = length (p^._1.rooms)
+          let roomCount = length (p^.rooms)
           p_ $ toHtml $ T.format "There {} {} {}."
                           (plural roomCount "was", roomCount,
                            plural roomCount "room")
@@ -789,7 +798,7 @@ roomPage
 roomPage gameId phaseNum roomNum = do
   s <- dbQuery GetGlobalState
   sess <- readSession
-  (game', _, _, room) <- getGamePhaseRoom gameId phaseNum roomNum
+  (game', _, room) <- getGamePhaseRoom gameId phaseNum roomNum
   players' <- mapM (dbQuery . GetUser) (room^.players)
   let findPlayer pid = fromJust $ find ((== pid) . view uid) players'
   let pageTitle = T.format "{}: phase #{}, room #{}"
@@ -856,6 +865,7 @@ roomPage gameId phaseNum roomNum = do
               py = players' !! y
               xAbsent = px^.uid `elem` room^.absentees
               yAbsent = py^.uid `elem` room^.absentees
+              yWinner = py^.uid `elem` room^.winners
           withP (x /= -1 && xAbsent || y /= -1 && yAbsent)
             [class_ " absent "] $
             case (x, y) of
@@ -871,6 +881,15 @@ roomPage gameId phaseNum roomNum = do
                                  [class_ "absent-button"] $
                          JS.setAbsent (gameId, phaseNum, roomNum,
                                        py^.uid, True)
+                if yWinner
+                  then imgButton "unmark as winner" "/badge-red.svg"
+                                 [class_ "winner-button"] $
+                         JS.setWinner (gameId, phaseNum, roomNum,
+                                       py^.uid, False)
+                  else imgButton "mark as winner" "/badge.svg"
+                                 [class_ "winner-button"] $
+                         JS.setWinner (gameId, phaseNum, roomNum,
+                                       py^.uid, True)                
                 userLink py
               -- upper row: guessers
               ( _, -1) -> td_ [class_ "header-top"] (userLink px)
@@ -994,7 +1013,7 @@ getGamePhaseRoom
   :: (MonadIO m, HasSpock (ActionCtxT ctx m),
       SpockState (ActionCtxT ctx m) ~ ServerState)
   => Uid Game -> Int -> Int
-  -> ActionCtxT ctx m (Game, Phase, Maybe PhaseResults, Room)
+  -> ActionCtxT ctx m (Game, Phase, Room)
 getGamePhaseRoom gameId phaseNum roomNum = do
   game' <- dbQuery (GetGame gameId)
   let mbPhase
@@ -1004,18 +1023,18 @@ getGamePhaseRoom gameId phaseNum roomNum = do
             Right <$> (game'^.currentPhase)
         | otherwise =
             Nothing
-  (phase', mbRes) <- case mbPhase of
+  phase' <- case mbPhase of
     Nothing -> do
       setStatus status404
       Spock.text "No phase with such number"
-    Just (Left (p, res)) -> return (p, Just res)
-    Just (Right p)       -> return (p, Nothing)
+    Just (Left  p) -> return p
+    Just (Right p) -> return p
   room <- case phase'^?rooms.ix (roomNum-1) of
     Nothing -> do
       setStatus status404
       Spock.text "No room with such number"
     Just room -> return room
-  return (game', phase', mbRes, room)
+  return (game', phase', room)
 
 getGameCurrentRoom
   :: (MonadIO m, HasSpock (ActionCtxT ctx m),

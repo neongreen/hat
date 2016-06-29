@@ -51,6 +51,7 @@ allJSFunctions = JS . T.unlines . map fromJS $ [
   generateGroups,
   beginNextPhase,
   setAbsent,
+  setWinner,
   startRound,
   cancelCurrentRound,
   finishCurrentRound,
@@ -509,6 +510,19 @@ setAbsent =
   [text|
     $.post("/game/" + gameId + "/" + phaseNum + "/" + roomNum +
            "/player/" + playerId + "/absent",
+           {"val": val})
+     .done(function () {
+        location.reload();
+     });
+  |]
+
+setWinner :: JSFunction a => a
+setWinner =
+  makeJSFunction "setWinner"
+                 ["gameId", "phaseNum", "roomNum", "playerId", "val"]
+  [text|
+    $.post("/game/" + gameId + "/" + phaseNum + "/" + roomNum +
+           "/player/" + playerId + "/winner",
            {"val": val})
      .done(function () {
         location.reload();

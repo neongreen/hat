@@ -117,6 +117,14 @@ textarea.fullwidth {
   width: 16px;
   opacity: 0.7;
   float: left;
+  margin-right: 6px;
+  padding-top: 1px;
+}
+
+.roomtable .winner-button {
+  width: 20px;
+  opacity: 0.8;
+  float: left;
   margin-right: 8px;
 }
 
