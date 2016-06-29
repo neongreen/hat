@@ -50,6 +50,7 @@ allJSFunctions = JS . T.unlines . map fromJS $ [
   endPreregistration,
   generateGroups,
   beginNextPhase,
+  finishCurrentPhase,
   setAbsent,
   setWinner,
   startRound,
@@ -498,6 +499,16 @@ beginNextPhase =
   [text|
     time = parseInt($(timeInput)[0].value, 10);
     $.post("/game/" + gameId + "/begin-next-phase", {"time-per-round": time})
+     .done(function () {
+        location.reload();
+     });
+  |]
+
+finishCurrentPhase :: JSFunction a => a
+finishCurrentPhase =
+  makeJSFunction "finishCurrentPhase" ["gameId"]
+  [text|
+    $.post("/game/" + gameId + "/finish-current-phase")
      .done(function () {
         location.reload();
      });

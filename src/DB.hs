@@ -36,6 +36,7 @@ module DB
     ended,
     wordReq,
     groups,
+    nextPhasePlayers,
     pastPhases,
     currentPhase,
   Phase(..),
@@ -91,9 +92,10 @@ module DB
   SetAdmin(..),
   AddGame(..),
   GetGame(..),
-  SetGameBegun(..),
+  BeginGame(..),
   SetGameGroups(..),
   SetGameCurrentPhase(..),
+  FinishCurrentPhase(..),
   StartRound(..),
   SetRoundResults(..),
   CancelCurrentRound(..),
@@ -222,6 +224,7 @@ data Game = Game {
   _gameBegun :: Bool,
   _gameEnded :: Bool,
   _gamePlayers :: Set (Uid User),
+  _gameNextPhasePlayers :: Set (Uid User),
   -- | A generated division of players into groups
   _gameGroups :: Maybe [[Uid User]],
   _gamePastPhases :: [Phase],
@@ -386,6 +389,7 @@ addGame uid' title' createdBy' wordReq' registerUntil' players' = do
         _gameBegun = False,
         _gameEnded = False,
         _gamePlayers = players',
+        _gameNextPhasePlayers = mempty,
         _gameGroups = Nothing,
         _gamePastPhases = [],
         _gameCurrentPhase = Nothing }
@@ -395,14 +399,28 @@ addGame uid' title' createdBy' wordReq' registerUntil' players' = do
 getGame :: Uid Game -> Acid.Query GlobalState Game
 getGame uid' = view (gameById uid')
 
-setGameBegun :: Uid Game -> Bool -> Acid.Update GlobalState ()
-setGameBegun gameId val = gameById gameId . begun .= val
+beginGame :: Uid Game -> Acid.Update GlobalState ()
+beginGame gameId = do
+  game' <- use (gameById gameId)
+  gameById gameId . begun .= True
+  gameById gameId . nextPhasePlayers .= game'^.players
 
 setGameGroups :: Uid Game -> Maybe [[Uid User]] -> Acid.Update GlobalState ()
 setGameGroups gameId val = gameById gameId . groups .= val
 
 setGameCurrentPhase :: Uid Game -> Phase -> Acid.Update GlobalState ()
 setGameCurrentPhase gameId val = gameById gameId . currentPhase .= Just val
+
+finishCurrentPhase :: Uid Game -> Acid.Update GlobalState ()
+finishCurrentPhase gameId = do
+  game' <- use (gameById gameId)
+  case game'^.currentPhase of
+    Nothing -> return ()
+    Just p  -> do
+      gameById gameId . currentPhase .= Nothing
+      gameById gameId . pastPhases %= (++ [p])
+      gameById gameId . nextPhasePlayers .= S.unions (p^..rooms.each.winners)
+      gameById gameId . groups .= Nothing
 
 startRound
   :: Uid Game
@@ -608,9 +626,10 @@ makeAcidic ''GlobalState [
   'setAdmin,
   'addGame,
   'getGame,
-  'setGameBegun,
+  'beginGame,
   'setGameGroups,
   'setGameCurrentPhase,
+  'finishCurrentPhase,
   'startRound,
   'setRoundResults,
   'setAbsent,

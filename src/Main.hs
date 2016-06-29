@@ -370,7 +370,7 @@ gameMethods = do
       jsonFail "You're not an admin"
     when (game'^.begun) $
       jsonFail "The game has already begun"
-    dbUpdate (SetGameBegun gameId True)
+    dbUpdate (BeginGame gameId)
     jsonSuccess
 
   Spock.post (gameVar <//> "begin-next-phase") $ \gameId -> do
@@ -409,6 +409,20 @@ gameMethods = do
         dbUpdate (SetGameCurrentPhase gameId phase')
         jsonSuccess
 
+  Spock.post (gameVar <//> "finish-current-phase") $ \gameId -> do
+    currentAdmin <- isAdmin
+    game' <- dbQuery (GetGame gameId)
+    when (not currentAdmin) $
+      jsonFail "You're not an admin"
+    when (game'^.ended) $
+      jsonFail "The game has already ended"
+    when (not (game'^.begun)) $
+      jsonFail "The game hasn't yet begun"
+    when (isNothing (game'^.currentPhase)) $
+      jsonFail "There's no phase in progress"
+    dbUpdate (FinishCurrentPhase gameId)
+    jsonSuccess
+
   Spock.post (gameVar <//> "generate-groups") $ \gameId -> do
     currentAdmin <- isAdmin
     num <- param' "num"
@@ -421,11 +435,11 @@ gameMethods = do
       jsonFail "The game has already ended"
     when (num < 1) $
       jsonFail "The number of groups is less than 1"
-    let pls = S.size (game'^.players)
+    let pls = S.size (game'^.nextPhasePlayers)
     when (num > pls) $
       jsonFail "There are more groups than players"
     let gs = concatMap (\(n, p) -> replicate n p) (calcBreak num pls)
-    ps <- shuffleM (S.toList (game'^.players))
+    ps <- shuffleM (S.toList (game'^.nextPhasePlayers))
     let grouped = splitPlaces gs ps
     dbUpdate (SetGameGroups gameId (Just grouped))
 
@@ -625,8 +639,15 @@ roomMethods = do
 
   Spock.post (gamePhaseRoomVars <//> "finish-current-round") $
     \gameId phaseNum roomNum -> do
-    (_, _, _) <- getGameCurrentRoom gameId phaseNum roomNum
+    (_, _, room) <- getGameCurrentRoom gameId phaseNum roomNum
     dbUpdate (FinishCurrentRound gameId roomNum)
+    -- If the schedule is still being computed, we have to restart computing
+    -- it (but if the schedule was complete, it's been updated by
+    -- FinishCurrentRound)
+    db <- _db <$> Spock.getState
+    case room^.schedule of
+      ScheduleDone{} -> return ()
+      ScheduleCalculating{} -> liftIO $ reschedule db gameId roomNum
 
 gamePage
   :: Uid Game
@@ -637,6 +658,7 @@ gamePage gameId = do
   game' <- dbQuery (GetGame gameId)
   creator <- dbQuery (GetUser (game'^.createdBy))
   players' <- mapM (dbQuery . GetUser) $ S.toList (game'^.players)
+  let findPlayer pid = fromJust $ find ((== pid) . view uid) players'
   groups' <- (_Just.each.each) (dbQuery . GetUser) $ game'^.groups
   currentAdmin <- isAdmin
   lucidIO $ wrapPage sess s (game'^.title <> " | Hat") $ do
@@ -726,24 +748,48 @@ gamePage gameId = do
       when (game'^.begun) $ do
         -- show past phases
         ifor_ (game'^.pastPhases) $ \i p -> do
-          h4_ $ toHtml $ T.format "Phase {}" [i+1]
+          h4_ $ toHtml $ T.format "Phase #{}" [i+1]
           let roomCount = length (p^.rooms)
-          p_ $ toHtml $ T.format "There {} {} {}."
-                          (plural roomCount "was", roomCount,
-                           plural roomCount "room")
+          p_ $ do
+            toHtml $ T.format "There {} {} {}. "
+                       (plural roomCount "was", roomCount,
+                        plural roomCount "room")
+            "The winners were: "
+            let ws = S.unions (p^..rooms.each.winners)
+            if null ws
+              then "none"
+              else list $ map (userLink . findPlayer) (S.toList ws)
+            "."
         unless (game'^.ended) $ case game'^.currentPhase of
           -- if there's a phase in progress, show it
           Just p -> do
             let pNum = length (game'^.pastPhases) + 1
             h4_ $ toHtml $ T.format "Phase #{}" [pNum]
+            let roomLink i = mkLink (toHtml (T.show i))
+                  (T.format "/game/{}/{}/{}" (gameId, pNum, i))
             p_ $ do
               "Rooms: "
-              let roomLink i = mkLink (toHtml (T.show i))
-                    (T.format "/game/{}/{}/{}" (gameId, pNum, i))
               list $ map roomLink [1..length (p^.rooms)]
-          -- if there isn't, choose players to advance to the next phase
+            ul_ $ do
+              li_ $ do
+                "Rooms without winners: "
+                if any (null . view winners) (p^.rooms)
+                  then list $ map roomLink [i | (i, r) <- zip [1..] (p^.rooms),
+                                                null (r^.winners)]
+                  else "none"
+              li_ $ do
+                "Winners: "
+                let ws = S.unions (p^..rooms.each.winners)
+                if null ws
+                  then "none"
+                  else list $ map (userLink . findPlayer) (S.toList ws)
+            button "Finish phase" [] $
+              JS.finishCurrentPhase [gameId]
+          -- if there isn't, plan the next phase
           Nothing -> do
-            let pls = S.size (game'^.players)
+            let pNum = length (game'^.pastPhases) + 1
+            h4_ $ toHtml $ T.format "Phase #{}" [pNum]
+            let pls = S.size (game'^.nextPhasePlayers)
             p_ $ do
               toHtml $ T.format "There {} {} {}. "
                 (plural pls "is", pls, plural pls "player")
