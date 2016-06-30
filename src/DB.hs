@@ -151,9 +151,9 @@ data User = User {
   _userUid :: Uid User,
   _userNick :: Text,
   _userName :: Text,
-  _userEmail :: Text,
+  _userEmail :: Maybe Text,
   _userCreated :: UTCTime,
-  _userPass :: EncryptedPass,
+  _userPass :: Maybe EncryptedPass,
   _userAdmin :: Bool }
   deriving (Show)
 
@@ -329,12 +329,12 @@ setSessions :: [(SessionId, UTCTime, Session)] -> Acid.Update GlobalState ()
 setSessions x = sessions .= x
 
 addUser
-  :: Uid User       -- ^ New user's uid
-  -> Text           -- ^ Nick
-  -> Text           -- ^ Name
-  -> EncryptedPass  -- ^ Pass
-  -> Text           -- ^ Email
-  -> UTCTime        -- ^ Creation time
+  :: Uid User             -- ^ New user's uid
+  -> Text                 -- ^ Nick
+  -> Text                 -- ^ Name
+  -> Maybe EncryptedPass  -- ^ Pass
+  -> Maybe Text           -- ^ Email
+  -> UTCTime              -- ^ Creation time
   -> Acid.Update GlobalState User
 addUser uid' nick' name' pass' email' now = do
   let user = User {
@@ -709,7 +709,7 @@ execCommand db s = do
             printf "%s (%s)\n" (user^.name) (user^.nick)
             printf "\n"
             printf "  * uid       %s\n" (uidToText (user^.uid))
-            printf "  * email     %s\n" (user^.email)
+            printf "  * email     %s\n" (fromMaybe "none" (user^.email))
             printf "  * created   %s\n" (show (user^.created))
             printf "  * admin     %s\n" (show (user^.admin))
         )
@@ -729,7 +729,7 @@ execCommand db s = do
             now  <- getCurrentTime
             encPass <- encryptPassIO' (Pass (T.encodeUtf8 pass'))
             Acid.update db $
-              AddUser uid' nick' name' encPass email' now
+              AddUser uid' nick' name' (Just encPass) (Just email') now
             printf "uid: %s\n" (uidToText uid')
         )
         (fmap (each %~ T.pack) $
@@ -766,7 +766,7 @@ execCommand db s = do
               now  <- getCurrentTime
               encPass <- encryptPassIO' (Pass (T.encodeUtf8 nick'))
               u <- Acid.update db $
-                AddUser uid' nick' name' encPass email' now
+                AddUser uid' nick' name' (Just encPass) (Just email') now
               when (i < 20) $ Acid.update db $
                 SetAdmin uid' True
               when (i `mod` 10 == 0) $

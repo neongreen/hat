@@ -206,10 +206,12 @@ main = do
         mbUser <- dbQuery (GetUserByNick' nick')
         case mbUser of
           Nothing   -> jsonFormFail "nick" "User not found"
-          Just user -> case verifyPass' pass' (user^.pass) of
-            False -> jsonFormFail "pass" "Incorrect password"
-            True  -> do writeSession (Just (user^.uid))
-                        jsonSuccess
+          Just user -> case user^.pass of
+              Nothing -> jsonFormFail "pass" "The user has no password"
+              Just p  -> case verifyPass' pass' p of
+                  False -> jsonFormFail "pass" "Incorrect password"
+                  True  -> do writeSession (Just (user^.uid))
+                              jsonSuccess
 
       Spock.get "signup" $ do
         s <- dbQuery GetGlobalState
@@ -274,7 +276,8 @@ main = do
         uid' <- randomShortUid
         encPass <- liftIO $ encryptPassIO' (Pass (T.encodeUtf8 pass'))
         now <- liftIO getCurrentTime
-        user <- dbUpdate (AddUser uid' nick' name' encPass email' now)
+        user <- dbUpdate $
+          AddUser uid' nick' name' (Just encPass) (Just email') now
         writeSession (Just (user^.uid))
         jsonSuccess
       Spock.post "logout" $ do
