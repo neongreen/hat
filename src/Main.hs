@@ -166,24 +166,11 @@ main = do
           ul_ $ for_ (s^.games) $ \g ->
             li_ $ mkLink (toHtml (g^.title))
                          ("/game/" <> uidToText (g^.uid))
+
+      Spock.get "admin" $ adminPage
       gameMethods
       roomMethods
       userMethods
-
-      Spock.get "admin" $ do
-        s <- dbQuery GetGlobalState
-        sess <- readSession
-        currentAdmin <- isAdmin
-        lucidIO $ wrapPage sess s "Admin | Hat" $ do
-          h2_ "Admin stuff"
-          if not currentAdmin
-            then p_ "You're not an admin."
-            else do
-              let (admins, ordinaryUsers) = partition (view admin) (s^.users)
-              h3_ "Admins"
-              p_ $ list $ map userLink admins
-              h3_ "Users"
-              p_ $ list $ map userLink ordinaryUsers
 
       Spock.get "login" $ do
         s <- dbQuery GetGlobalState
@@ -283,6 +270,35 @@ main = do
       Spock.post "logout" $ do
         writeSession Nothing
 
+      Spock.post "create-users" $ do
+        currentAdmin <- isAdmin
+        when (not currentAdmin) $
+          fail "not an admin"
+        userNames <- map T.strip . T.splitOn "," <$> param' "users"
+        allUsers <- view users <$> dbQuery GetGlobalState
+        when (any T.null userNames) $
+          jsonFormFail "users" "Empty names aren't allowed"
+        case userNames `intersect` (allUsers^..each.name) of
+          [] -> return ()
+          is -> jsonFormFail "users" $
+                  T.format "Taken names: {}" [T.intercalate ", " is]
+        let findDups = map head . filter ((>1) . length) . group . sort
+        case findDups userNames of
+          [] -> return ()
+          is -> jsonFormFail "users" $
+                  T.format "Duplicate names: {}" [T.intercalate ", " is]
+        case findDups (map makeSlug userNames) of
+          [] -> return ()
+          is -> jsonFormFail "users" $
+                  T.format "Duplicate slugs: {}" [T.intercalate ", " is]
+        for_ userNames $ \name' -> do
+          uid' <- randomShortUid
+          now <- liftIO getCurrentTime
+          let nick' = makeSlug name'
+          dbUpdate $
+            AddUser uid' nick' name' Nothing Nothing now
+        jsonSuccess
+
 wrapPage
   :: (MonadIO m, MonadRandom m)
   => Session
@@ -353,6 +369,31 @@ wrapPage sess gs pageTitle page = doctypehtml_ $ do
              " / "
              mkLink "issue tracker" "https://github.com/neongreen/hat/issues"
         ]
+
+adminPage
+  :: SpockActionCtx ctx conn Session ServerState ()
+adminPage = do
+  s <- dbQuery GetGlobalState
+  sess <- readSession
+  currentAdmin <- isAdmin
+  lucidIO $ wrapPage sess s "Admin | Hat" $ do
+    h2_ "Admin stuff"
+    if not currentAdmin
+      then p_ "You're not an admin."
+      else do
+        let (admins, ordinaryUsers) = partition (view admin) (s^.users)
+        h3_ "Admins"
+        p_ $ list $ map userLink admins
+        h3_ "Users"
+        p_ $ list $ map userLink ordinaryUsers
+        h3_ "Create new users"
+        let formSubmitHandler formNode =
+              JS.createUsers [formNode]
+        form_ [onFormSubmit formSubmitHandler] $ do
+          label_ [Lucid.for_ "users"]
+            "Users' names (separated by commas)"
+          textarea_ [name_ "users"] ""
+          input_ [type_ "submit", value_ "Create"]
 
 {-
 How preregistration works:

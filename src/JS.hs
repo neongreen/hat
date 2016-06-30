@@ -45,6 +45,7 @@ allJSFunctions = JS . T.unlines . map fromJS $ [
   logout,
   -- Other
   submitWords,
+  createUsers,
   showRoundEditPopup,
   addPlayerSelf, removePlayerSelf,
   endPreregistration,
@@ -315,6 +316,19 @@ submitWords =
   makeJSFunction "submitWords" ["gameId", "form"]
   [text|
     $.post("/game/" + gameId + "/words/submit", $(form).serialize())
+     .done(function (data) {
+        if (data[0])
+          location.reload();
+        else
+          showFormError(form, data[1], data[2]);
+     });
+  |]
+
+createUsers :: JSFunction a => a
+createUsers =
+  makeJSFunction "submitWords" ["form"]
+  [text|
+    $.post("/create-users", $(form).serialize())
      .done(function (data) {
         if (data[0])
           location.reload();
