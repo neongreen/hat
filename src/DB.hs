@@ -41,6 +41,7 @@ module DB
     currentPhase,
   Phase(..),
     timePerRound,
+    winnersPerRoom,
   Round(..),
     mbInfo,
   RoundInfo(..),
@@ -187,6 +188,7 @@ data ScheduleStatus
 data Phase = Phase {
   -- | In seconds
   _phaseTimePerRound :: Int,
+  _phaseWinnersPerRoom :: Map Int Int,
   _phaseRooms :: [Room] }
   deriving (Show)
 

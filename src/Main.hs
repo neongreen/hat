@@ -419,6 +419,10 @@ gameMethods = do
 
   Spock.post (gameVar <//> "begin-next-phase") $ \gameId -> do
     timePerRound' <- param' "time-per-round"
+    winnersPerRoom' <-
+      map (over each (read . T.unpack) . over _2 T.tail . T.break (== '=')) .
+      T.splitOn "," <$>
+        param' "winners-per-room"
     currentAdmin <- isAdmin
     game' <- dbQuery (GetGame gameId)
     when (not currentAdmin) $
@@ -432,6 +436,8 @@ gameMethods = do
     case game'^.groups of
       Nothing -> jsonFail "The players haven't been divided into groups"
       Just gs -> do
+        unless (sort (map fst winnersPerRoom') == sort (nub (map length gs))) $
+          jsonFail "Winners-per-room is wrong"
         rooms' <- for gs $ \gr -> do
           sch <- case precomputedSchedules ^? ix (length gr) of
             -- TODO: fix
@@ -449,6 +455,7 @@ gameMethods = do
             _roomSchedule = ScheduleDone sch }
         let phase' = Phase {
               _phaseTimePerRound = timePerRound',
+              _phaseWinnersPerRoom = M.fromList winnersPerRoom',
               _phaseRooms = rooms' }
         dbUpdate (SetGameCurrentPhase gameId phase')
         jsonSuccess
@@ -877,8 +884,14 @@ gamePage gameId = do
                   JS.recalcTime (maxRounds,
                                  JS.selectId "time-per-round",
                                  JS.selectId "time-per-game")
+                p_ $ do
+                  "Winners per room: "
+                  input_ [type_ "text", id_ "winners-per-room",
+                          style_ "width:10em;margin-bottom:0px;"]
                 button "Begin phase" [] $
-                  JS.beginNextPhase (gameId, JS.selectId "time-per-round")
+                  JS.beginNextPhase
+                    (gameId, JS.selectId "time-per-round",
+                             JS.selectId "winners-per-room")
 
 roomPage
   :: Uid Game
@@ -888,7 +901,7 @@ roomPage
 roomPage gameId phaseNum roomNum = do
   s <- dbQuery GetGlobalState
   sess <- readSession
-  (game', _, room) <- getGamePhaseRoom gameId phaseNum roomNum
+  (game', phase', room) <- getGamePhaseRoom gameId phaseNum roomNum
   players' <- mapM (dbQuery . GetUser) (room^.players)
   let findPlayer pid = fromJust $ find ((== pid) . view uid) players'
   let pageTitle = T.format "{}: phase #{}, room #{}"
@@ -926,24 +939,26 @@ roomPage gameId phaseNum roomNum = do
               td_ [class_ "impossible"] ""
 
     -- Helpers: penalties & totals
+    let calcPenalty pid = sum . catMaybes $ do
+          ((a, b), r) <- M.toList (room^.table)
+          [guard (pid == a) *> r^?mbInfo.discards,
+           guard (pid == a) *> r^?mbInfo.namerPenalty,
+           guard (pid == b) *> r^?mbInfo.guesserPenalty ]
+    let calcTotal pid = sum . catMaybes $ do
+          ((a, b), r) <- M.toList (room^.table)
+          [guard (pid == a)         *> r^?mbInfo.discards.to negate,
+           guard (pid == a)         *> r^?mbInfo.namerPenalty.to negate,
+           guard (pid == b)         *> r^?mbInfo.guesserPenalty.to negate,
+           guard (pid `elem` [a,b]) *> r^?mbInfo.score ]
     let penaltiesRow = tr_ [class_ "penalties"] $ do
           td_ "Penalty"
           for_ players' $ \p -> do
-            let penalty = sum . catMaybes $ do
-                  ((a, b), r) <- M.toList (room^.table)
-                  [guard (p^.uid == a) *> r^?mbInfo.discards,
-                   guard (p^.uid == a) *> r^?mbInfo.namerPenalty,
-                   guard (p^.uid == b) *> r^?mbInfo.guesserPenalty ]
+            let penalty = calcPenalty (p^.uid)
             td_ $ when (penalty /= 0) $ toHtml ("−" <> T.show penalty)
     let totalsRow = tr_ [class_ "totals"] $ do
           td_ "Total"
           for_ players' $ \p -> do
-            let total = sum . catMaybes $ do
-                  ((a, b), r) <- M.toList (room^.table)
-                  [guard (p^.uid == a) *> r^?mbInfo.discards.to negate,
-                   guard (p^.uid == a) *> r^?mbInfo.namerPenalty.to negate,
-                   guard (p^.uid == b) *> r^?mbInfo.guesserPenalty.to negate,
-                   guard (p^.uid `elem` [a,b]) *> r^?mbInfo.score ]
+            let total = calcTotal (p^.uid)
             td_ $ toHtml (T.show total)
 
     -- Actually generate the table
@@ -988,6 +1003,8 @@ roomPage gameId phaseNum roomNum = do
       totalsRow
 
     div_ [id_ "rounds-container"] $ do
+      let allPlayed = length (room^.pastGames) ==
+                      length players' * (length players' - 1)
       -- Next rounds
       div_ [class_ "future-rounds"] $ do
         h5_ "Rounds left to play"
@@ -1003,8 +1020,6 @@ roomPage gameId phaseNum roomNum = do
               (iLeft, iTotal, T.fixed 0 percent)
           ScheduleDone sch -> do
             let roundsLeft = sch^..each
-                allPlayed = length (room^.pastGames) ==
-                            length players' * (length players' - 1)
             if | null roundsLeft && allPlayed ->
                    "None."
                | null roundsLeft ->
@@ -1025,9 +1040,22 @@ roomPage gameId phaseNum roomNum = do
         h5_ "Current round"
         case (room^.currentRound, room^.schedule) of
           (Nothing, ScheduleCalculating{}) ->
-            "The current round is unavailable at the moment."
-          (Nothing, ScheduleDone []) ->
-            "None!"
+            p_ "The current round is unavailable at the moment."
+          (Nothing, ScheduleDone [])
+            | not allPlayed ->
+                p_ "None."
+            | otherwise -> do
+                p_ "None! Here are the players sorted by score:"
+                let sorted = reverse . sortWith snd .
+                             map (\x -> (x, calcTotal (x^.uid))) $
+                               players'
+                ol_ $ for_ sorted $ \(p, total) -> li_ $ do
+                  userLink p
+                  toHtml $ T.format ": {} {}" (total, plural total "point")
+                p_ $ do
+                  toHtml $ T.format "Mark {} players as winners."
+                    [phase'^?!winnersPerRoom.ix (length players')]
+                  " If there's a tie, play some quick rounds to resolve it."
           (Nothing, ScheduleDone ((namerId, guesserId):_)) -> do
             let namer = findPlayer namerId
                 guesser = findPlayer guesserId

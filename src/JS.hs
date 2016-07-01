@@ -509,10 +509,13 @@ generateGroups =
 
 beginNextPhase :: JSFunction a => a
 beginNextPhase =
-  makeJSFunction "beginNextPhase" ["gameId", "timeInput"]
+  makeJSFunction "beginNextPhase" ["gameId", "timeInput", "winnersInput"]
   [text|
     time = parseInt($(timeInput)[0].value, 10);
-    $.post("/game/" + gameId + "/begin-next-phase", {"time-per-round": time})
+    winners = $(winnersInput)[0].value;
+    $.post("/game/" + gameId + "/begin-next-phase",
+           {"time-per-round"   : time,
+            "winners-per-room" : winners})
      .done(function () {
         location.reload();
      });
