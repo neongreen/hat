@@ -740,6 +740,24 @@ execCommand db s = do
                  <*> strArgument (metavar "PASS")
                  <*> strArgument (metavar "EMAIL"))
 
+      addCommand "users.admin"
+        "Make someone an admin"
+        (\u -> do
+            user <- findUser u
+            Acid.update db $
+              SetAdmin (user^.uid) True
+        )
+        userArg
+
+      addCommand "users.unadmin"
+        "Make someone an ordinary user"
+        (\u -> do
+            user <- findUser u
+            Acid.update db $
+              SetAdmin (user^.uid) False
+        )
+        userArg
+
       addCommand' "games"
         "List games"
         (do gs <- view games <$> Acid.query db GetGlobalState
