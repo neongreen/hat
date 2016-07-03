@@ -315,12 +315,6 @@ emptyState = GlobalState {
   _globalStateSessions = [],
   _globalStateDirty = True }
 
--- | A useful lens operator that modifies something and returns the old value.
-(<<.=) :: MonadState s m => LensLike ((,) a) s s a b -> b -> m a
-(<<.=) l b = state (l (,b))
-{-# INLINE (<<.=) #-}
-infix 4 <<.=
-
 getGlobalState :: Acid.Query GlobalState GlobalState
 getGlobalState = view id
 
