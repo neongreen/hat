@@ -364,7 +364,6 @@ wrapPage sess gs pageTitle page = doctypehtml_ $ do
       mapM_ (div_ [class_ "footer-item"]) $
         [ do "made by "
              mkLink "Artyom" "https://artyom.me"
-        , do mkLink "DDRaniki 2016" "https://vk.com/ddraniki"
         , do mkLink "source" "https://github.com/neongreen/hat"
              " / "
              mkLink "issue tracker" "https://github.com/neongreen/hat/issues"
