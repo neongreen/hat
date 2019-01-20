@@ -650,12 +650,12 @@ pauseTimer =
 
 escapeJSString :: Text -> Text
 escapeJSString s =
-    T.builderToStrict $
+    T.toStrict $
     T.bsingleton '"' <> quote s <> T.bsingleton '"'
   where
     quote q = case T.uncons t of
-      Nothing       -> T.strictToBuilder h
-      Just (!c, t') -> T.strictToBuilder h <> escape c <> quote t'
+      Nothing       -> T.toBuilder h
+      Just (!c, t') -> T.toBuilder h <> escape c <> quote t'
       where
         (h, t) = T.break isEscape q
     -- 'isEscape' doesn't mention \n, \r and \t because they are handled by
@@ -671,7 +671,7 @@ escapeJSString s =
     escape '\t' = "\\t"
     escape c
       | c < '\x20' || c == '\x2028' || c == '\x2029' =
-          T.strictToBuilder $ "\\u" <> T.replicate (4 - T.length h) "0" <> h
+          T.toBuilder $ "\\u" <> T.replicate (4 - T.length h) "0" <> h
       | otherwise =
           T.bsingleton c
       where

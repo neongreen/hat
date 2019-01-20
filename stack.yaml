@@ -1,0 +1,9 @@
+resolver: lts-7.24
+packages: [.]
+extra-deps:
+- Spock-0.10.0.1
+- Spock-lucid-0.2.0.0
+- reroute-0.3.1.0
+- ilist-0.3.1.0
+- text-all-0.4.2
+- text-1.2.3.1

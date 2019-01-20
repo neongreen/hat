@@ -124,6 +124,7 @@ main = do
                   Acid.update db SetDirty
                   Acid.update db (SetSessions ss) } } }
     -- The command-line interface thread
+    putStrLn "Running on port 7070.\n"
     Slave.fork $ forever $ do
       putStr "> "
       cmd <- getLine
@@ -300,7 +301,7 @@ main = do
         jsonSuccess
 
 wrapPage
-  :: (MonadIO m, MonadRandom m)
+  :: MonadIO m
   => Session
   -> GlobalState
   -> Text                              -- ^ Page title
@@ -993,7 +994,7 @@ roomPage gameId phaseNum roomNum = do
                   else imgButton "mark as winner" "/badge.svg"
                                  [class_ "winner-button"] $
                          JS.setWinner (gameId, phaseNum, roomNum,
-                                       py^.uid, True)                
+                                       py^.uid, True)
                 userLink py
               -- upper row: guessers
               ( _, -1) -> td_ [class_ "header-top"] (userLink px)
